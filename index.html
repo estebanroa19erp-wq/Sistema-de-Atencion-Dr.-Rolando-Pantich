@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dr. Rolando Esteban Pantich - Agenda Médica</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root{--primary:#00BFA5;--primary-dark:#00897B;--secondary:#4A90E2;--danger:#E74C3C;--danger-dark:#C0392B;--warning:#F39C12;--dark:#2C3E50;--gray:#7F8C8D;--light-gray:#ECF0F1;--shadow:0 4px 20px rgba(0,0,0,0.1);--radius:16px}
+        *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+        body{font-family:'Inter',-apple-system,sans-serif;background:#F5F7FA;color:var(--dark);line-height:1.6}
+        .header{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);color:white;padding:20px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow)}
+        .header-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .back-btn{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;color:white;text-decoration:none}
+        .header-title{font-size:18px;font-weight:600}
+        .doctor-card{background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);border-radius:var(--radius);padding:16px;display:flex;align-items:center;gap:16px}
+        .doctor-avatar{width:60px;height:60px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--primary)}
+        .doctor-info h1{font-size:18px;font-weight:700;margin-bottom:4px}
+        .container{max-width:600px;margin:0 auto;padding:20px}
+        .alert-box{background:linear-gradient(135deg,#FFF3E0 0%,#FFE0B2 100%);border-left:4px solid var(--warning);border-radius:8px;padding:16px;margin-bottom:20px;display:flex;gap:12px}
+        .alert-box i{color:var(--warning);font-size:20px}
+        .section{background:white;border-radius:var(--radius);padding:20px;margin-bottom:20px;box-shadow:var(--shadow)}
+        .section-title{font-size:16px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+        .days-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+        .day-card{background:var(--light-gray);border:2px solid transparent;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all 0.3s}
+        .day-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+        .day-card.active{background:#E0F7FA;border-color:var(--primary)}
+        .day-name{font-size:12px;font-weight:600;color:var(--gray);text-transform:uppercase;margin-bottom:4px}
+        .day-date{font-size:18px;font-weight:700;margin-bottom:8px}
+        .day-slots{font-size:12px;padding:4px 12px;border-radius:12px;background:#27AE60;color:white;display:inline-block}
+        .slots-container{display:none}
+        .slots-container.active{display:block;animation:fadeIn 0.3s}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        .slots-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+        .slot-btn{background:white;border:2px solid var(--light-gray);border-radius:8px;padding:16px 8px;text-align:center;cursor:pointer;transition:all 0.2s}
+        .slot-btn:hover:not(.disabled){border-color:var(--primary);transform:scale(1.02)}
+        .slot-btn.selected{background:var(--primary);border-color:var(--primary);color:white}
+        .slot-btn.disabled{background:var(--light-gray);color:var(--gray);cursor:not-allowed;opacity:0.7}
+        .slot-time{font-size:16px;font-weight:600;display:block;margin-bottom:4px}
+        .urgency-btn{width:100%;background:linear-gradient(135deg,var(--danger) 0%,var(--danger-dark) 100%);color:white;border:none;border-radius:var(--radius);padding:24px;cursor:pointer;position:relative;overflow:hidden;box-shadow:0 8px 25px rgba(231,76,60,0.3);animation:pulse-urgency 2s infinite}
+        @keyframes pulse-urgency{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+        .urgency-content{display:flex;align-items:center;gap:16px}
+        .urgency-icon{width:56px;height:56px;background:rgba(255,255,255,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px}
+        .urgency-text{flex:1;text-align:left}
+        .urgency-title{font-size:18px;font-weight:700;margin-bottom:4px}
+        .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;justify-content:flex-end;align-items:flex-end}
+        .modal.active{display:flex}
+        .modal-content{background:white;width:100%;max-height:90vh;border-radius:var(--radius) var(--radius) 0 0;overflow:hidden;animation:slideUp 0.3s}
+        @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+        .modal-header{background:var(--danger);color:white;padding:20px;display:flex;align-items:center;gap:12px}
+        .modal-header.success{background:#27AE60}
+        .modal-close{width:36px;height:36px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .modal-body{padding:24px;overflow-y:auto;max-height:calc(90vh - 80px)}
+        .form-step{display:none}
+        .form-step.active{display:block}
+        .warning-box{background:#FADBD8;border-radius:8px;padding:16px;margin-bottom:24px;display:flex;gap:12px}
+        .question-title{font-size:18px;font-weight:600;text-align:center;margin-bottom:20px}
+        .btn-group{display:flex;flex-direction:column;gap:12px}
+        .btn-option{background:white;border:2px solid var(--light-gray);border-radius:8px;padding:20px;cursor:pointer;display:flex;align-items:center;gap:16px;transition:all 0.2s;text-align:left}
+        .btn-option:hover{border-color:var(--primary);transform:translateX(4px)}
+        .btn-option.selected{background:var(--primary);border-color:var(--primary);color:white}
+        .btn-option.danger{border-color:var(--danger)}
+        .btn-option.danger.selected{background:var(--danger)}
+        .input-group{margin-bottom:20px}
+        .input-group.highlight{background:#FADBD8;padding:16px;border-radius:8px;border-left:4px solid var(--danger)}
+        .input-label{display:block;font-size:14px;font-weight:600;margin-bottom:8px}
+        input,textarea{width:100%;padding:16px;border:2px solid var(--light-gray);border-radius:8px;font-size:16px;font-family:inherit}
+        input:focus,textarea:focus{outline:none;border-color:var(--primary)}
+        .phone-prefix{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-weight:600}
+        input[type="tel"]{padding-left:80px}
+        .checkbox-group{display:flex;flex-wrap:wrap;gap:10px}
+        .checkbox-item{flex:1;min-width:140px}
+        .checkbox-item input{display:none}
+        .checkbox-label{display:block;padding:12px 16px;background:var(--light-gray);border-radius:8px;text-align:center;cursor:pointer;font-size:14px;border:2px solid transparent}
+        .checkbox-item input:checked+.checkbox-label{background:var(--danger);color:white;border-color:var(--danger)}
+        .btn-primary{width:100%;background:var(--secondary);color:white;border:none;border-radius:8px;padding:18px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+        .btn-primary.btn-danger{background:var(--danger)}
+        .success-container{text-align:center;padding:40px 20px}
+        .success-icon{width:100px;height:100px;background:#D5F4E6;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:48px;color:#27AE60}
+        .success-title{font-size:24px;font-weight:700;color:#27AE60;margin-bottom:16px}
+        .success-phone{font-size:20px;font-weight:700;color:var(--danger);display:block;margin:16px 0}
+        .hidden{display:none!important}
+        .mt-20{margin-top:20px}
+        .loading{display:inline-block;width:20px;height:20px;border:3px solid rgba(255,255,255,0.3);border-radius:50%;border-top-color:white;animation:spin 1s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-top">
+            <a href="#" class="back-btn"><i class="fas fa-arrow-left"></i></a>
+            <span class="header-title">Agendar Turno</span>
+            <div class="header-icon"><i class="fas fa-calendar-check"></i></div>
+        </div>
+        <div class="doctor-card">
+            <div class="doctor-avatar"><i class="fas fa-user-md"></i></div>
+            <div class="doctor-info">
+                <h1>Dr. Rolando Esteban Pantich</h1>
+                <p>❤️ Cardiología - Electrofisiología</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="alert-box">
+            <i class="fas fa-info-circle"></i>
+            <div>
+                <strong>Horario de Atención</strong><br>
+                Solo Martes y Jueves de 17:00 a 22:00 hs. 5 turnos programados + 2 cupos de urgencia por día.
+            </div>
+        </div>
+
+        <section class="section">
+            <h2 class="section-title"><i class="fas fa-calendar-alt" style="color:var(--primary)"></i> Seleccionar Día</h2>
+            <div class="days-grid" id="daysGrid"></div>
+        </section>
+
+        <section class="section slots-container" id="slotsSection">
+            <h2 class="section-title"><i class="fas fa-clock" style="color:var(--secondary)"></i> Horarios Disponibles</h2>
+            <div class="slots-grid" id="slotsGrid"></div>
+            <button class="btn-primary mt-20" id="btnConfirmarTurno" disabled onclick="confirmarTurno()">
+                <i class="fas fa-check"></i> Confirmar Turno
+            </button>
+        </section>
+
+        <section class="urgency-section">
+            <button class="urgency-btn" id="btnUrgencia" onclick="abrirModalUrgencia()">
+                <div class="urgency-content">
+                    <div class="urgency-icon"><i class="fas fa-ambulance"></i></div>
+                    <div class="urgency-text">
+                        <div class="urgency-title">🚨 SOLICITAR TURNO DE URGENCIA</div>
+                        <div style="font-size:14px;opacity:0.9">2 cupos disponibles hoy</div>
+                        <div style="font-size:12px;opacity:0.8">Secretaria contactará en 30 min</div>
+                    </div>
+                </div>
+            </button>
+        </section>
+    </main>
+
+    <div class="modal" id="modalUrgencia">
+        <div class="modal-content">
+            <div class="modal-header" id="modalHeader">
+                <i class="fas fa-ambulance"></i>
+                <h2>Solicitud de Urgencia</h2>
+                <button class="modal-close" onclick="cerrarModalUrgencia()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-step active" id="step1">
+                    <div class="warning-box">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Esta opción es <strong>SOLO para casos de URGENCIA</strong> que no pueden esperar.</p>
+                    </div>
+                    <div class="question-title">¿Requiere atención en las próximas 24-48 horas?</div>
+                    <div class="btn-group">
+                        <button class="btn-option danger" onclick="document.getElementById('step1').classList.remove('active');document.getElementById('step2').classList.add('active')">
+                            <i class="fas fa-check"></i>
+                            <div>
+                                <div style="font-weight:600">SÍ, ES URGENCIA</div>
+                                <div style="font-size:13px;opacity:0.8">Necesito atención prioritaria</div>
+                            </div>
+                        </button>
+                        <button class="btn-option" onclick="cerrarModalUrgencia()">
+                            <i class="fas fa-arrow-left"></i>
+                            <div>
+                                <div style="font-weight:600">NO, PUEDO ESPERAR</div>
+                                <div style="font-size:13px;opacity:0.8">Volver a turnos programados</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-step" id="step2">
+                    <h3 style="margin-bottom:20px;text-align:center">Complete sus datos</h3>
+                    <div class="input-group">
+                        <label class="input-label">Nombre *</label>
+                        <input type="text" id="urgNombre" placeholder="Ingrese su nombre">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Apellido *</label>
+                        <input type="text" id="urgApellido" placeholder="Ingrese su apellido">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">DNI *</label>
+                        <input type="text" id="urgDni" placeholder="Número de documento">
+                    </div>
+                    <div class="input-group highlight">
+                        <label class="input-label">📱 Teléfono para contacto URGENTE *</label>
+                        <div style="position:relative">
+                            <span class="phone-prefix">+54 9</span>
+                            <input type="tel" id="urgTelefono" placeholder="11 1234 5678" maxlength="10">
+                        </div>
+                        <p style="font-size:12px;color:var(--danger);margin-top:8px"><i class="fas fa-exclamation-circle"></i> La secretaria usará este número para contactarlo INMEDIATAMENTE</p>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Motivo de urgencia *</label>
+                        <textarea id="urgMotivo" placeholder="Describa los síntomas..." rows="3"></textarea>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">¿Tiene dispositivo cardíaco?</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="radio" name="dispositivo" value="marcapasos"><span class="checkbox-label">Marcapasos</span></label>
+                            <label class="checkbox-item"><input type="radio" name="dispositivo" value="dai"><span class="checkbox-label">DAI</span></label>
+                            <label class="checkbox-item"><input type="radio" name="dispositivo" value="ninguno" checked><span class="checkbox-label">Ninguno</span></label>
+                            <label class="checkbox-item"><input type="radio" name="dispositivo" value="desconocido"><span class="checkbox-label">No sé</span></label>
+                        </div>
+                    </div>
+                    <button class="btn-primary btn-danger" onclick="enviarUrgencia()">
+                        <i class="fas fa-paper-plane"></i> ENVIAR SOLICITUD
+                    </button>
+                </div>
+
+                <div class="form-step" id="step3">
+                    <div class="success-container">
+                        <div class="success-icon"><i class="fas fa-check"></i></div>
+                        <div class="success-title">¡Solicitud Recibida!</div>
+                        <p style="color:var(--gray);margin-bottom:16px">La secretaria se contactará al <span class="success-phone" id="successPhone"></span> en menos de <strong>30 minutos</strong>.</p>
+                        <div style="background:#FFF3E0;border-radius:8px;padding:16px;font-size:14px;color:#E65100;margin-bottom:24px">
+                            <i class="fas fa-info-circle"></i> Mantenga su teléfono disponible. Si empeora, acuda a la guardia.
+                        </div>
+                        <button class="btn-primary" onclick="cerrarModalUrgencia();location.reload()">ENTENDIDO</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG={DIAS_ATENCION:[2,4],HORA_INICIO:17,HORA_FIN:22};
+        let state={selectedDay:null,selectedSlot:null,cuposUrgencia:2};
+
+        document.addEventListener('DOMContentLoaded',()=>{
+            generarDias();
+            if(state.cuposUrgencia<=0)document.getElementById('btnUrgencia').disabled=true;
+        });
+
+        function generarDias(){
+            const container=document.getElementById('daysGrid');
+            const hoy=new Date();
+            let html='',diasGen=0,fecha=new Date(hoy);
+            while(diasGen<8){
+                fecha.setDate(fecha.getDate()+1);
+                const diaSem=fecha.getDay();
+                if(CONFIG.DIAS_ATENCION.includes(diaSem)){
+                    const nombre=diaSem===2?'Martes':'Jueves';
+                    const fechaStr=fecha.toLocaleDateString('es-AR',{day:'numeric',month:'short'});
+                    const fechaISO=fecha.toISOString().split('T')[0];
+                    const cupos=Math.floor(Math.random()*5)+1;
+                    html+=`<div class="day-card" onclick="seleccionarDia('${fechaISO}','${nombre}',this)"><div class="day-name">${nombre}</div><div class="day-date">${fechaStr}</div><span class="day-slots ${cupos<=2?'low':''}">${cupos} cupos</span></div>`;
+                    diasGen++;
+                }
+            }
+            container.innerHTML=html;
+        }
+
+        function seleccionarDia(fecha,nombre,el){
+            document.querySelectorAll('.day-card').forEach(c=>c.classList.remove('active'));
+            el.classList.add('active');
+            state.selectedDay={fecha,nombre};
+            document.getElementById('slotsSection').classList.add('active');
+            generarHorarios();
+            setTimeout(()=>document.getElementById('slotsSection').scrollIntoView({behavior:'smooth'}),100);
+        }
+
+        function generarHorarios(){
+            const container=document.getElementById('slotsGrid');
+            let html='';
+            for(let h=CONFIG.HORA_INICIO;h<CONFIG.HORA_FIN;h++){
+                const horaStr=`${h.toString().padStart(2,'0')}:00`;
+                const ocupado=Math.random()>0.7;
+                html+=`<button class="slot-btn ${ocupado?'disabled':''}" onclick="seleccionarHora('${horaStr}',this)" ${ocupado?'disabled':''}><span class="slot-time">${horaStr}</span><span style="font-size:11px">${ocupado?'Ocupado':'Disponible'}</span></button>`;
+            }
+            container.innerHTML=html;
+        }
+
+        function seleccionarHora(hora,el){
+            if(el.classList.contains('disabled'))return;
+            document.querySelectorAll('.slot-btn').forEach(b=>b.classList.remove('selected'));
+            el.classList.add('selected');
+            state.selectedSlot=hora;
+            document.getElementById('btnConfirmarTurno').disabled=false;
+        }
+
+        function confirmarTurno(){
+            if(!state.selectedDay||!state.selectedSlot)return;
+            alert(`✅ Turno solicitado:\n${state.selectedDay.nombre} ${state.selectedDay.fecha}\nHora: ${state.selectedSlot}`);
+        }
+
+        function abrirModalUrgencia(){
+            if(state.cuposUrgencia<=0){alert('No hay cupos de urgencia disponibles');return;}
+            document.getElementById('modalUrgencia').classList.add('active');
+        }
+
+        function cerrarModalUrgencia(){
+            document.getElementById('modalUrgencia').classList.remove('active');
+        }
+
+        function enviarUrgencia(){
+            const nombre=document.getElementById('urgNombre').value.trim();
+            const apellido=document.getElementById('urgApellido').value.trim();
+            const dni=document.getElementById('urgDni').value.trim();
+            const tel=document.getElementById('urgTelefono').value.trim();
+            const motivo=document.getElementById('urgMotivo').value.trim();
+            
+            if(!nombre||!apellido||!dni||!tel||!motivo){alert('Complete todos los campos');return;}
+            if(tel.length<10){alert('Teléfono inválido');return;}
+            
+            const btn=document.querySelector('#step2 .btn-danger');
+            btn.innerHTML='<span class="loading"></span> Enviando...';
+            btn.disabled=true;
+            
+            setTimeout(()=>{
+                state.cuposUrgencia--;
+                document.getElementById('successPhone').textContent=`11 ${tel}`;
+                document.getElementById('step2').classList.remove('active');
+                document.getElementById('step3').classList.add('active');
+                document.getElementById('modalHeader').classList.add('success');
+            },1500);
+        }
+
+        window.onclick=e=>{
+            if(e.target.classList.contains('modal'))cerrarModalUrgencia();
+        }
+    </script>
+</body>
+</html>
