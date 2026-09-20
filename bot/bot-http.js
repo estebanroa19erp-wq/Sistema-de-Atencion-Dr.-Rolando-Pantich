@@ -134,7 +134,7 @@ function startHttpServer(bot, ADMIN_IDS) {
     json(res, { error: 'not found' }, 404);
   });
 
-  const HOST = process.env.FLY_APP_NAME ? '0.0.0.0' : '127.0.0.1';
+  const HOST = (process.env.FLY_APP_NAME || process.env.RENDER) ? '0.0.0.0' : '127.0.0.1';
   server.listen(PORT, HOST, () => {
     console.log(`HTTP API: http://${HOST}:${PORT}`);
   });
