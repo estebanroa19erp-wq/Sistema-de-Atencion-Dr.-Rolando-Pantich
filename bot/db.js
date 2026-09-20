@@ -1,20 +1,12 @@
-const Database = require('libsql');
+const Database = require('better-sqlite3');
 const path = require('path');
 
 const DB_PATH = path.join(
   process.env.DATA_DIR || (process.env.FLY_APP_NAME ? '/data' : __dirname),
   'rolo-turnos.db'
 );
-const dbOpts = process.env.TURSO_URL
-  ? { syncUrl: process.env.TURSO_URL, authToken: process.env.TURSO_TOKEN || '', syncPeriod: 60 }
-  : {};
-const db = new Database(DB_PATH, dbOpts);
-
-async function syncDB() {
-  if (db.sync) {
-    try { await db.sync(); console.log('Turso sync OK'); } catch (e) { console.warn('Turso sync warn:', e.message); }
-  }
-}
+const db = new Database(DB_PATH);
+function syncDB() { return Promise.resolve(); }
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS turnos (

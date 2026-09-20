@@ -8,7 +8,7 @@
     "dev": "node --watch rolo-bot.js"
   },
   "dependencies": {
-    "libsql": "^0.5.29",
+    "better-sqlite3": "^9.4.3",
     "dotenv": "^16.4.5",
     "googleapis": "^140.0.0",
     "node-telegram-bot-api": "^0.67.0"
