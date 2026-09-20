@@ -1,5 +1,6 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
+const { startHttpServer } = require('./bot-http');
 const {
   getConfig, setConfig,
   getSession, saveSession, deleteSession,
@@ -556,6 +557,76 @@ bot.on('callback_query', async (query) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
+
+// ── WEB turno handlers ───────────────────────────────────────────────────────
+
+bot.on('callback_query', async (query) => {
+  const id = query.message.chat.id;
+  const data = query.data;
+  if (!data.startsWith('WEB_')) return;
+  bot.answerCallbackQuery(query.id).catch(()=>{});
+  if (!isAdmin(id)) return;
+  const msgId = query.message.message_id;
+  const edit = (text) => bot.editMessageText(text, { chat_id:id, message_id:msgId }).catch(()=>{});
+
+  if (data.startsWith('WEB_OK:')) {
+    const turnoId = parseInt(data.split(':')[1]);
+    const t = getTurnoById(turnoId);
+    if (!t) { edit('Turno no encontrado.'); return; }
+    updateTurnoEstado(turnoId, 'confirmado');
+    const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    edit(`✅ Turno WEB #${turnoId} confirmado\n\n${t.tipo==='CONTROL_MARCAPASOS'?'Control Marcapasos':'Consulta'}\n📅 ${f}\n🕐 ${t.hora}hs\n👤 ${t.nombre}\n📱 ${t.telefono}\n\nContactar al paciente para notificarle.`);
+    return;
+  }
+
+  if (data.startsWith('WEB_REJ:')) {
+    const turnoId = parseInt(data.split(':')[1]);
+    const t = getTurnoById(turnoId);
+    if (!t) { edit('Turno no encontrado.'); return; }
+    updateTurnoEstado(turnoId, 'rechazado');
+    if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
+    edit(`❌ Turno WEB #${turnoId} rechazado.\n👤 ${t.nombre} — 📱 ${t.telefono}\n\nAvisar al paciente.`);
+    return;
+  }
+
+  if (data.startsWith('WEB_REP:')) {
+    const turnoId = parseInt(data.split(':')[1]);
+    const t = getTurnoById(turnoId);
+    if (!t) { edit('Turno no encontrado.'); return; }
+    ws(id, { step:'ADMIN_REP_DIA', repTurnoId:turnoId, repPatientId:'WEB' });
+    const dias = getProximosDias(6);
+    const rows = dias.map(d => {
+      const slots = getSlotsLibres(d.fecha);
+      return [btn(slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`, slots.length ? `REPDIA:${d.fecha}` : 'LLENO')];
+    });
+    bot.deleteMessage(id, msgId).catch(()=>{});
+    bot.sendMessage(id, `🔄 Reprogramar turno WEB #${turnoId} - ${t.nombre}\n\nElegí el nuevo día:`, kb(rows));
+    return;
+  }
+});
+
+// ── HTTP API ─────────────────────────────────────────────────────────────────
+startHttpServer(bot, ADMIN_IDS);
+
+// ── Registro en Cloudflare Worker (si configurado) ───────────────────────────
+(async () => {
+  const workerUrl = process.env.WORKER_URL;
+  const workerSecret = process.env.WORKER_SECRET;
+  const tunnelUrl = process.env.TUNNEL_URL;
+  if (workerUrl && tunnelUrl) {
+    try {
+      const https = require('https');
+      const body = JSON.stringify({ botUrl: tunnelUrl, secret: workerSecret || '' });
+      const url = new URL(workerUrl + '/register');
+      const req = https.request({ hostname: url.hostname, path: url.pathname, method: 'PUT', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, () => {
+        console.log('Worker registrado:', tunnelUrl);
+        notify(`🌐 Bot API online: ${tunnelUrl}`).catch(()=>{});
+      });
+      req.on('error', () => {});
+      req.write(body); req.end();
+    } catch {}
+  }
+})();
 
 bot.on('polling_error', (err) => console.error('POLLING ERR:', err.code, err.message));
 

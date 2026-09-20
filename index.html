@@ -345,6 +345,7 @@
     </div>
 
     <script>
+        const BOT_URL='https://sparkling-lake-e9b6.repantich.workers.dev';
         const CONFIG={DIAS_ATENCION:[2,4],HORA_INICIO:17,HORA_FIN:22};
         let state={
             selectedDay:null,
@@ -447,21 +448,20 @@
             document.getElementById('calendarioSection').scrollIntoView({behavior:'smooth'});
         }
 
-        function generarDias(){
+        async function generarDias(){
             const container=document.getElementById('daysGrid');
-            const hoy=new Date();
-            let html='',diasGen=0,fecha=new Date(hoy);
-            while(diasGen<8){
-                fecha.setDate(fecha.getDate()+1);
-                const diaSem=fecha.getDay();
-                if(CONFIG.DIAS_ATENCION.includes(diaSem)){
-                    const nombre=diaSem===2?'Martes':'Jueves';
-                    const fechaStr=fecha.toLocaleDateString('es-AR',{day:'numeric',month:'short'});
-                    const fechaISO=fecha.toISOString().split('T')[0];
-                    const cupos=Math.floor(Math.random()*5)+1;
-                    html+=`<div class="day-card" onclick="seleccionarDia('${fechaISO}','${nombre}',this)"><div class="day-name">${nombre}</div><div class="day-date">${fechaStr}</div><span class="day-slots ${cupos<=2?'low':''}">${cupos} cupos</span></div>`;
-                    diasGen++;
-                }
+            container.innerHTML='<p style="text-align:center;color:var(--gray);padding:20px">Cargando disponibilidad...</p>';
+            let dias=[];
+            try{const r=await fetch(BOT_URL+'/api/dias');const d=await r.json();if(d.ok)dias=d.dias;}catch{}
+            if(!dias.length){
+                const hoy=new Date();let fecha=new Date(hoy),gen=0;
+                while(gen<6){fecha.setDate(fecha.getDate()+1);const diaSem=fecha.getDay();if(CONFIG.DIAS_ATENCION.includes(diaSem)){dias.push({fecha:fecha.toISOString().split('T')[0],nombre:diaSem===2?'Martes':'Jueves',cupos:Math.floor(Math.random()*5)+1});gen++;}}
+            }
+            let html='';
+            for(const d of dias){
+                const cupos=d.cupos||0;const lleno=cupos===0;
+                const fechaLabel=new Date(d.fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'numeric',month:'short'});
+                html+=`<div class="day-card${lleno?' disabled':''}" onclick="${lleno?'':(`seleccionarDia('${d.fecha}','${d.nombre}',this)`)}" style="${lleno?'opacity:.5;cursor:not-allowed':''}"><div class="day-name">${d.nombre}</div><div class="day-date">${fechaLabel}</div><span class="day-slots${cupos<=2?' low':''}">${lleno?'Sin cupos':cupos+' cupo'+(cupos!==1?'s':'')}</span></div>`;
             }
             container.innerHTML=html;
         }
@@ -475,13 +475,17 @@
             setTimeout(()=>document.getElementById('slotsSection').scrollIntoView({behavior:'smooth'}),100);
         }
 
-        function generarHorarios(){
+        async function generarHorarios(){
             const container=document.getElementById('slotsGrid');
+            container.innerHTML='<p style="text-align:center;color:var(--gray);padding:20px">Cargando horarios...</p>';
+            let slots=[];
+            try{const r=await fetch(BOT_URL+'/api/slots?fecha='+state.selectedDay.fecha);const d=await r.json();if(d.ok)slots=d.slots;}catch{}
+            if(!slots.length){for(let h=CONFIG.HORA_INICIO;h<CONFIG.HORA_FIN;h++){if(Math.random()>0.3)slots.push(String(h).padStart(2,'0')+':00');}}
             let html='';
             for(let h=CONFIG.HORA_INICIO;h<CONFIG.HORA_FIN;h++){
-                const horaStr=`${h.toString().padStart(2,'0')}:00`;
-                const ocupado=Math.random()>0.7;
-                html+=`<button class="slot-btn ${ocupado?'disabled':''}" onclick="seleccionarHora('${horaStr}',this)" ${ocupado?'disabled':''}><span class="slot-time">${horaStr}</span><span style="font-size:11px">${ocupado?'Ocupado':'Disponible'}</span></button>`;
+                const horaStr=String(h).padStart(2,'0')+':00';
+                const disp=slots.includes(horaStr);
+                html+=`<button class="slot-btn ${disp?'':'disabled'}" onclick="seleccionarHora('${horaStr}',this)" ${disp?'':'disabled'}><span class="slot-time">${horaStr}</span><span style="font-size:11px">${disp?'Disponible':'Ocupado'}</span></button>`;
             }
             container.innerHTML=html;
         }
@@ -496,19 +500,34 @@
 
         function confirmarTurno(){
             if(!state.selectedDay||!state.selectedSlot)return;
-            
-            // Crear evento en Google Calendar
-            const evento={
-                titulo:`Consulta - ${state.respuestas.p3==='CONTROL_MARCAPASOS'?'Control Marcapasos':'Consulta Cardiología'}`,
-                fecha:state.selectedDay.fecha,
-                hora:state.selectedSlot,
-                paciente:'Paciente',
-                tipo:state.respuestas.p3
-            };
-            
-            agregarAGoogleCalendar(evento);
-            
-            alert(`✅ Turno confirmado:\n${state.selectedDay.nombre} ${state.selectedDay.fecha}\nHora: ${state.selectedSlot}\n\nSe abrirá Google Calendar para agendar.`);
+            let sec=document.getElementById('datosSection');
+            if(!sec){
+                sec=document.createElement('section');sec.id='datosSection';sec.className='section';
+                sec.innerHTML=`<h2 class="section-title"><i class="fas fa-user" style="color:var(--primary)"></i> Sus datos</h2><div class="input-group"><label class="input-label">Nombre completo *</label><input type="text" id="pacNombre" placeholder="Juan Pérez"></div><div class="input-group"><label class="input-label">WhatsApp / Teléfono *</label><input type="tel" id="pacTelefono" placeholder="3794123456"></div><button class="btn-primary" onclick="enviarTurnoFinal()"><i class="fas fa-check"></i> Confirmar Turno</button>`;
+                document.getElementById('slotsSection').insertAdjacentElement('afterend',sec);
+            }
+            document.getElementById('btnConfirmarTurno').disabled=true;
+            sec.classList.remove('hidden');sec.scrollIntoView({behavior:'smooth'});
+        }
+
+        async function enviarTurnoFinal(){
+            const nombre=document.getElementById('pacNombre').value.trim();
+            const tel=document.getElementById('pacTelefono').value.trim();
+            if(!nombre)return alert('Ingrese su nombre');
+            if(!tel||tel.length<8)return alert('Ingrese un teléfono válido');
+            const btn=document.querySelector('#datosSection .btn-primary');
+            btn.innerHTML='<span class="loading"></span> Enviando...';btn.disabled=true;
+            try{
+                const r=await fetch(BOT_URL+'/api/turno',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,telefono:tel,fecha:state.selectedDay.fecha,hora:state.selectedSlot,tipo:state.respuestas.p3||'CONSULTA_SIMPLE',p1:state.respuestas.p1,p2:state.respuestas.p2,p2Extra:state.respuestas.p2Extra,derivado:!!state.respuestas.derivado,nombreColega:state.respuestas.nombreColega})});
+                const data=await r.json();
+                if(r.status===409){btn.innerHTML='<i class="fas fa-check"></i> Confirmar Turno';btn.disabled=false;alert('Ese horario ya no está disponible. Elegí otro.');await generarHorarios();return;}
+                if(!data.ok)throw new Error(data.error||'Error');
+                const fl=new Date(state.selectedDay.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+                document.getElementById('datosSection').innerHTML=`<div style="text-align:center;padding:20px"><div style="width:70px;height:70px;background:#D5F4E6;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:36px">✅</div><h2 style="color:#27AE60;margin-bottom:12px">¡Solicitud enviada!</h2><p style="color:var(--gray)"><strong>${fl} — ${state.selectedSlot}hs</strong></p><p style="color:var(--gray);margin-top:8px">El Dr. Pantich confirmará tu turno.<br>Te contactaremos al <strong>${tel}</strong>.</p></div>`;
+            }catch(e){
+                btn.innerHTML='<i class="fas fa-check"></i> Confirmar Turno';btn.disabled=false;
+                agregarAGoogleCalendar({titulo:'Consulta Dr. Pantich',fecha:state.selectedDay.fecha,hora:state.selectedSlot});
+            }
         }
 
         function agregarAGoogleCalendar(evento){
@@ -567,20 +586,12 @@
                 document.getElementById('step3').classList.add('active');
                 document.getElementById('modalHeader').classList.add('success');
                 
-                // Enviar notificación por email (simulado)
-                enviarNotificacionEmail({nombre,apellido,tel,motivo});
+                enviarNotificacionEmail({nombre,apellido,dni,tel,motivo});
             },1500);
         }
 
-        function enviarNotificacionEmail(datos){
-            // En producción, esto se conecta a un backend
-            console.log('📧 Email enviado al Dr. Pantich:',{
-                para:'dr.pantich@gmail.com',
-                asunto:'🚨 Nueva Urgencia - Paciente ' + datos.nombre + ' ' + datos.apellido,
-                telefono:datos.tel,
-                motivo:datos.motivo,
-                fecha:new Date().toLocaleString()
-            });
+        async function enviarNotificacionEmail(datos){
+            try{await fetch(BOT_URL+'/api/urgencia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre:datos.nombre,apellido:datos.apellido,dni:datos.dni||'',telefono:datos.tel,motivo:datos.motivo})});}catch{}
         }
 
         window.onclick=e=>{
