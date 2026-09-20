@@ -1,15 +1,19 @@
 services:
   - type: web
-    name: rolo-pantich-bot
+    name: bot-dr-pantich
     env: node
     plan: free
     rootDir: bot
-    buildCommand: npm ci
+    buildCommand: npm install
     startCommand: node rolo-bot.js
     healthCheckPath: /ping
     envVars:
       - key: NODE_ENV
         value: production
+      - key: WORKER_URL
+        value: https://sparkling-lake-e9b6.repantich.workers.dev
+      - key: DATA_DIR
+        value: /tmp
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_CHAT_IDS
@@ -17,10 +21,4 @@ services:
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: WORKER_URL
-        value: https://sparkling-lake-e9b6.repantich.workers.dev
-      - key: TURSO_URL
-        sync: false
-      - key: TURSO_TOKEN
         sync: false
