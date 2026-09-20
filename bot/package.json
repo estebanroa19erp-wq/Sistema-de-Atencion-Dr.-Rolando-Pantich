@@ -1,0 +1,16 @@
+{
+  "name": "rolo-bot",
+  "version": "1.0.0",
+  "description": "Bot Telegram Dr. Rolando Pantich - Turnos + Google Calendar",
+  "main": "rolo-bot.js",
+  "scripts": {
+    "start": "node rolo-bot.js",
+    "dev": "node --watch rolo-bot.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^140.0.0",
+    "telegraf": "^4.16.3"
+  }
+}
