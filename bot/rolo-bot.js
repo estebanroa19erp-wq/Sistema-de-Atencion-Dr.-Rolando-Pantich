@@ -540,7 +540,7 @@ bot.on('callback_query', async (query) => {
   if (data==='ADMIN:AUTH') {
     if (!isAdmin(id)) return;
     const url = getAuthUrl();
-    edit(`🔑 Abrí este link en el navegador del servidor:\n${url}`);
+    bot.sendMessage(id, '🔑 Abrí este link EN EL NAVEGADOR DE ESTA PC (Windows):', {reply_markup:{inline_keyboard:[[{text:'Autorizar Google Calendar',url}]]}});
     waitForCode(300000)
       .then(async code => { await exchangeCode(code); notify('✅ Google Calendar vinculado.'); })
       .catch(()=>{});
