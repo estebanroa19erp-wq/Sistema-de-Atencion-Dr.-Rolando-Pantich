@@ -14,13 +14,24 @@ const { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento } = r
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) { console.error('BOT_TOKEN faltante en .env'); process.exit(1); }
 
-const ADMIN_ID = process.env.ADMIN_CHAT_ID || getConfig('admin_chat_id') || '';
+// Múltiples admins: separados por coma en ADMIN_CHAT_IDS
+// Ej: ADMIN_CHAT_IDS=111111111,222222222,333333333
+const ADMIN_IDS = (process.env.ADMIN_CHAT_IDS || process.env.ADMIN_CHAT_ID || getConfig('admin_chat_ids') || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 const bot = new Telegraf(BOT_TOKEN);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function isAdmin(ctx) {
-  return ADMIN_ID && String(ctx.from.id) === String(ADMIN_ID);
+  return ADMIN_IDS.includes(String(ctx.from.id));
+}
+
+// Para notificar a TODOS los admins
+async function notifyAdmins(msg, opts) {
+  for (const id of ADMIN_IDS) {
+    await bot.telegram.sendMessage(id, msg, opts).catch(() => {});
+  }
 }
 
 function ss(ctx) {
@@ -220,9 +231,7 @@ bot.action(/^CANCELAR:(.+)$/, async (ctx) => {
   if (t.gcal_event_id) await eliminarEvento(t.gcal_event_id).catch(() => {});
   const fecha = new Date(t.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
   await ctx.editMessageText(`✅ Turno cancelado:\n📅 ${fecha} — ${t.hora}hs`);
-  if (ADMIN_ID) {
-    await bot.telegram.sendMessage(ADMIN_ID, `🔴 Turno cancelado:\n${formatTurno(t)}`).catch(() => {});
-  }
+  await notifyAdmins(`🔴 Turno cancelado:\n${formatTurno(t)}`);
 });
 
 // Selección de día del calendario
@@ -297,10 +306,8 @@ bot.action(/^CONFIRMAR:(.+)$/, async (ctx) => {
     if (ev && ev.id) setTurnoGcalId(turnoId, ev.id);
   }).catch(() => {});
   // Notificar al Dr.
-  if (ADMIN_ID) {
-    const msg = `🆕 *Nuevo turno #${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${session.selectedHora}hs\n👤 ${session.nombre}\n📱 ${session.telefono}\n📍 ${session.p2 === 'CORRIENTES_CAPITAL' ? 'Corrientes Capital' : session.p2Extra}`;
-    await bot.telegram.sendMessage(ADMIN_ID, msg, { parse_mode: 'Markdown' }).catch(() => {});
-  }
+  const msgAdmin = `🆕 *Nuevo turno #${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${session.selectedHora}hs\n👤 ${session.nombre}\n📱 ${session.telefono}\n📍 ${session.p2 === 'CORRIENTES_CAPITAL' ? 'Corrientes Capital' : session.p2Extra}`;
+  await notifyAdmins(msgAdmin, { parse_mode: 'Markdown' });
 });
 
 bot.action('BACK:CALENDARIO', async (ctx) => {
@@ -545,7 +552,7 @@ bot.action('ADMIN:AUTH', adminOnly(async (ctx) => {
   waitForCode(300000)
     .then(async (code) => {
       await exchangeCode(code);
-      await bot.telegram.sendMessage(ADMIN_ID, '✅ Google Calendar vinculado.').catch(() => {});
+      await notifyAdmins('✅ Google Calendar vinculado.');
     })
     .catch(() => {});
 }));
@@ -553,8 +560,8 @@ bot.action('ADMIN:AUTH', adminOnly(async (ctx) => {
 // ─── Launch ──────────────────────────────────────────────────────────────────
 
 bot.launch().then(() => {
-  console.log('🏥 Bot Dr. Pantich activo');
-  if (ADMIN_ID) bot.telegram.sendMessage(ADMIN_ID, '🟢 Bot iniciado').catch(() => {});
+  console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
+  notifyAdmins('🟢 Bot iniciado').catch(() => {});
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
