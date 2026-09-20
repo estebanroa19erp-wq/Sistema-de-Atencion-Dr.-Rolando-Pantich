@@ -1,10 +1,20 @@
-const Database = require('better-sqlite3');
+const Database = require('libsql');
 const path = require('path');
 
-const DB_PATH = process.env.FLY_APP_NAME
-  ? '/data/rolo-turnos.db'
-  : path.join(__dirname, 'rolo-turnos.db');
-const db = new Database(DB_PATH);
+const DB_PATH = path.join(
+  process.env.FLY_APP_NAME ? '/data' : __dirname,
+  'rolo-turnos.db'
+);
+const dbOpts = process.env.TURSO_URL
+  ? { syncUrl: process.env.TURSO_URL, authToken: process.env.TURSO_TOKEN || '', syncPeriod: 60 }
+  : {};
+const db = new Database(DB_PATH, dbOpts);
+
+async function syncDB() {
+  if (db.sync) {
+    try { await db.sync(); console.log('Turso sync OK'); } catch (e) { console.warn('Turso sync warn:', e.message); }
+  }
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS turnos (
@@ -161,7 +171,7 @@ function getUrgenciasCountHoy(fecha) {
 }
 
 module.exports = {
-  db, getConfig, setConfig,
+  db, syncDB, getConfig, setConfig,
   getSession, saveSession, deleteSession,
   saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
   getTurnosPendientes,

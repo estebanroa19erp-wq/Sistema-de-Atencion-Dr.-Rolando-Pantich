@@ -8,8 +8,10 @@ const {
   getTurnosByChatId, cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy, getTurnosPendientes,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
-  getTurnosCountByFecha
+  getTurnosCountByFecha,
+  syncDB
 } = require('./db');
+syncDB().catch(() => {});
 const { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento } = require('./calendar');
 
 const TOKEN = process.env.BOT_TOKEN;

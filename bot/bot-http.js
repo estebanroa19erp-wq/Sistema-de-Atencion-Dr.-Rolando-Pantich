@@ -6,7 +6,7 @@ const {
 } = require('./db');
 const { crearEvento } = require('./calendar');
 
-const PORT = parseInt(process.env.HTTP_PORT || '3850');
+const PORT = parseInt(process.env.PORT || process.env.HTTP_PORT || '3850');
 
 function json(res, data, status) {
   res.writeHead(status || 200, {
@@ -71,6 +71,8 @@ function startHttpServer(bot, ADMIN_IDS) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     if (req.method === 'OPTIONS') { json(res, {}, 200); return; }
+
+    if (url.pathname === '/ping') { json(res, {ok:true, ts:Date.now()}); return; }
 
     // GET /api/dias
     if (req.method === 'GET' && url.pathname === '/api/dias') {
