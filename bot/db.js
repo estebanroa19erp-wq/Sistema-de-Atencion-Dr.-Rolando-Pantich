@@ -1,54 +1,25 @@
-const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(
-  process.env.DATA_DIR || (process.env.FLY_APP_NAME ? '/data' : __dirname),
-  'rolo-turnos.db'
-);
-const db = new Database(DB_PATH);
-function syncDB() { return Promise.resolve(); }
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const TURNOS_FILE = path.join(DATA_DIR, 'turnos.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS turnos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id TEXT NOT NULL,
-  nombre TEXT,
-  telefono TEXT,
-  fecha TEXT NOT NULL,
-  hora TEXT NOT NULL,
-  tipo TEXT NOT NULL,
-  p1 TEXT,
-  p2 TEXT,
-  p2_extra TEXT,
-  derivado INTEGER DEFAULT 0,
-  nombre_colega TEXT,
-  estado TEXT DEFAULT 'pendiente',
-  es_urgencia INTEGER DEFAULT 0,
-  gcal_event_id TEXT,
-  created_at TEXT DEFAULT (datetime('now','localtime'))
-);
+function readJSON(file, def) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return def; }
+}
+function writeJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
 
-CREATE TABLE IF NOT EXISTS slots_bloqueados (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  fecha TEXT NOT NULL,
-  hora TEXT NOT NULL,
-  motivo TEXT,
-  UNIQUE(fecha, hora)
-);
+let _turnosId = 0;
+let _turnos = readJSON(TURNOS_FILE, []);
+if (_turnos.length) _turnosId = Math.max(..._turnos.map(t => t.id));
 
-CREATE TABLE IF NOT EXISTS config (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
+let _slots = [];
+let _sessions = {};
 
-CREATE TABLE IF NOT EXISTS sessions (
-  chat_id TEXT PRIMARY KEY,
-  state TEXT NOT NULL,
-  updated_at TEXT DEFAULT (datetime('now','localtime'))
-);
-`);
-
-const defaults = {
+const _configDefaults = {
   dias_atencion: '[2,4]',
   hora_inicio: '17',
   hora_fin: '22',
@@ -57,113 +28,109 @@ const defaults = {
   google_refresh_token: '',
   google_calendar_id: 'primary'
 };
-const insertDefault = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
-for (const [k, v] of Object.entries(defaults)) insertDefault.run(k, v);
+let _config = Object.assign({}, _configDefaults, readJSON(CONFIG_FILE, {}));
 
-function getConfig(key) {
-  const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
-  return row ? row.value : null;
-}
+function syncDB() { return Promise.resolve(); }
 
+function getConfig(key) { return _config[key] ?? null; }
 function setConfig(key, value) {
-  db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, String(value));
+  _config[key] = String(value);
+  writeJSON(CONFIG_FILE, _config);
 }
 
-function getSession(chatId) {
-  const row = db.prepare('SELECT state FROM sessions WHERE chat_id = ?').get(String(chatId));
-  return row ? JSON.parse(row.state) : null;
-}
-
-function saveSession(chatId, state) {
-  db.prepare("INSERT OR REPLACE INTO sessions (chat_id, state, updated_at) VALUES (?, ?, datetime('now','localtime'))").run(String(chatId), JSON.stringify(state));
-}
-
-function deleteSession(chatId) {
-  db.prepare('DELETE FROM sessions WHERE chat_id = ?').run(String(chatId));
-}
+function getSession(chatId) { return _sessions[String(chatId)] || null; }
+function saveSession(chatId, state) { _sessions[String(chatId)] = state; }
+function deleteSession(chatId) { delete _sessions[String(chatId)]; }
 
 function saveTurno(data) {
-  return db.prepare(`
-    INSERT INTO turnos (chat_id, nombre, telefono, fecha, hora, tipo, p1, p2, p2_extra, derivado, nombre_colega, es_urgencia, estado)
-    VALUES (@chat_id, @nombre, @telefono, @fecha, @hora, @tipo, @p1, @p2, @p2_extra, @derivado, @nombre_colega, @es_urgencia, 'pendiente_confirmacion')
-  `).run(data);
+  const turno = {
+    id: ++_turnosId,
+    chat_id: data.chat_id,
+    nombre: data.nombre || null,
+    telefono: data.telefono || null,
+    fecha: data.fecha,
+    hora: data.hora,
+    tipo: data.tipo,
+    p1: data.p1 || null,
+    p2: data.p2 || null,
+    p2_extra: data.p2_extra || null,
+    derivado: data.derivado || 0,
+    nombre_colega: data.nombre_colega || null,
+    es_urgencia: data.es_urgencia || 0,
+    estado: 'pendiente_confirmacion',
+    gcal_event_id: null,
+    created_at: new Date().toLocaleString('sv').replace(' ', 'T')
+  };
+  _turnos.push(turno);
+  writeJSON(TURNOS_FILE, _turnos);
+  return { lastInsertRowid: turno.id };
 }
 
 function updateTurnoEstado(id, estado) {
-  db.prepare("UPDATE turnos SET estado=? WHERE id=?").run(estado, id);
+  const t = _turnos.find(t => t.id === id);
+  if (t) { t.estado = estado; writeJSON(TURNOS_FILE, _turnos); }
 }
 
 function reprogramarTurno(id, fecha, hora) {
-  db.prepare("UPDATE turnos SET fecha=?, hora=?, estado='confirmado' WHERE id=?").run(fecha, hora, id);
+  const t = _turnos.find(t => t.id === id);
+  if (t) { t.fecha = fecha; t.hora = hora; t.estado = 'confirmado'; writeJSON(TURNOS_FILE, _turnos); }
 }
 
 function setTurnoGcalId(id, eventId) {
-  db.prepare('UPDATE turnos SET gcal_event_id = ? WHERE id = ?').run(eventId, id);
+  const t = _turnos.find(t => t.id === id);
+  if (t) { t.gcal_event_id = eventId; writeJSON(TURNOS_FILE, _turnos); }
 }
 
+function getTurnoById(id) { return _turnos.find(t => t.id === id) || null; }
+
 function getTurnosByFecha(fecha) {
-  return db.prepare("SELECT * FROM turnos WHERE fecha = ? AND estado != 'cancelado' ORDER BY hora").all(fecha);
+  return _turnos.filter(t => t.fecha === fecha && t.estado !== 'cancelado').sort((a,b) => a.hora.localeCompare(b.hora));
 }
 
 function getTurnosByChatId(chatId) {
-  return db.prepare(`
-    SELECT * FROM turnos WHERE chat_id = ? AND estado = 'pendiente'
-    AND fecha >= date('now','localtime') ORDER BY fecha, hora
-  `).all(String(chatId));
+  const hoy = new Date().toISOString().slice(0,10);
+  return _turnos.filter(t => t.chat_id === String(chatId) && t.estado === 'pendiente' && t.fecha >= hoy).sort((a,b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
 }
 
-function cancelarTurno(id) {
-  db.prepare("UPDATE turnos SET estado = 'cancelado' WHERE id = ?").run(id);
-}
-
-function getTurnoById(id) {
-  return db.prepare('SELECT * FROM turnos WHERE id = ?').get(id);
-}
+function cancelarTurno(id) { updateTurnoEstado(id, 'cancelado'); }
 
 function getProximosTurnos(dias) {
-  return db.prepare(`
-    SELECT * FROM turnos
-    WHERE fecha >= date('now','localtime')
-    AND fecha <= date('now','localtime','+'||?||' days')
-    AND estado != 'cancelado'
-    ORDER BY fecha, hora
-  `).all(dias || 7);
+  const hoy = new Date().toISOString().slice(0,10);
+  const limite = new Date(Date.now() + (dias||7)*864e5).toISOString().slice(0,10);
+  return _turnos.filter(t => t.fecha >= hoy && t.fecha <= limite && t.estado !== 'cancelado').sort((a,b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
 }
 
 function getTurnosHoy() {
-  return db.prepare(`
-    SELECT * FROM turnos WHERE fecha = date('now','localtime') AND estado != 'cancelado' ORDER BY hora
-  `).all();
-}
-
-function isSlotBloqueado(fecha, hora) {
-  return !!db.prepare('SELECT 1 FROM slots_bloqueados WHERE fecha = ? AND hora = ?').get(fecha, hora);
-}
-
-function bloquearSlot(fecha, hora, motivo) {
-  db.prepare('INSERT OR IGNORE INTO slots_bloqueados (fecha, hora, motivo) VALUES (?, ?, ?)').run(fecha, hora, motivo || '');
-}
-
-function desbloquearSlot(fecha, hora) {
-  db.prepare('DELETE FROM slots_bloqueados WHERE fecha = ? AND hora = ?').run(fecha, hora);
+  const hoy = new Date().toLocaleString('sv').slice(0,10);
+  return _turnos.filter(t => t.fecha === hoy && t.estado !== 'cancelado').sort((a,b) => a.hora.localeCompare(b.hora));
 }
 
 function getTurnosPendientes() {
-  return db.prepare("SELECT * FROM turnos WHERE estado='pendiente_confirmacion' ORDER BY fecha,hora").all();
+  return _turnos.filter(t => t.estado === 'pendiente_confirmacion').sort((a,b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
 }
 
 function getTurnosCountByFecha(fecha) {
-  const row = db.prepare("SELECT COUNT(*) as c FROM turnos WHERE fecha = ? AND estado != 'cancelado' AND es_urgencia = 0").get(fecha);
-  return row ? row.c : 0;
+  return _turnos.filter(t => t.fecha === fecha && t.estado !== 'cancelado' && !t.es_urgencia).length;
 }
 
 function getUrgenciasCountHoy(fecha) {
-  const row = db.prepare("SELECT COUNT(*) as c FROM turnos WHERE fecha = ? AND estado != 'cancelado' AND es_urgencia = 1").get(fecha);
-  return row ? row.c : 0;
+  return _turnos.filter(t => t.fecha === fecha && t.estado !== 'cancelado' && t.es_urgencia).length;
+}
+
+function isSlotBloqueado(fecha, hora) {
+  return _slots.some(s => s.fecha === fecha && s.hora === hora);
+}
+
+function bloquearSlot(fecha, hora, motivo) {
+  if (!isSlotBloqueado(fecha, hora)) _slots.push({ fecha, hora, motivo: motivo || '' });
+}
+
+function desbloquearSlot(fecha, hora) {
+  _slots = _slots.filter(s => !(s.fecha === fecha && s.hora === hora));
 }
 
 module.exports = {
-  db, syncDB, getConfig, setConfig,
+  db: null, syncDB, getConfig, setConfig,
   getSession, saveSession, deleteSession,
   saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
   getTurnosPendientes,
