@@ -1,92 +1,63 @@
 require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
+const TelegramBot = require('/Users/abogadoestebanpantich/pantich-bots/node_modules/node-telegram-bot-api');
 const {
   getConfig, setConfig,
   getSession, saveSession, deleteSession,
-  saveTurno, setTurnoGcalId,
+  saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
   getTurnosByChatId, cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
-  getTurnosCountByFecha, getUrgenciasCountHoy
+  getTurnosCountByFecha
 } = require('./db');
 const { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento } = require('./calendar');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) { console.error('BOT_TOKEN faltante en .env'); process.exit(1); }
+const TOKEN = process.env.BOT_TOKEN;
+if (!TOKEN) { console.error('BOT_TOKEN faltante'); process.exit(1); }
 
-// Múltiples admins: separados por coma en ADMIN_CHAT_IDS
-// Ej: ADMIN_CHAT_IDS=111111111,222222222,333333333
-const ADMIN_IDS = (process.env.ADMIN_CHAT_IDS || process.env.ADMIN_CHAT_ID || getConfig('admin_chat_ids') || '')
+const ADMIN_IDS = (process.env.ADMIN_CHAT_IDS || process.env.ADMIN_CHAT_ID || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 
-const bot = new Telegraf(BOT_TOKEN);
+const bot = new TelegramBot(TOKEN, {
+  polling: true,
+  request: { family: 4, agentOptions: { family: 4 } }
+});
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function isAdmin(ctx) {
-  return ADMIN_IDS.includes(String(ctx.from.id));
-}
+const isAdmin = (id) => ADMIN_IDS.includes(String(id));
 
-// Para notificar a TODOS los admins
-async function notifyAdmins(msg, opts) {
+function ss(id) { return getSession(id) || {}; }
+function ws(id, data) { saveSession(id, { ...ss(id), ...data }); }
+function ds(id) { deleteSession(id); }
+
+function kb(rows) { return { reply_markup: { inline_keyboard: rows } }; }
+function btn(text, data) { return { text, callback_data: data }; }
+
+async function notify(msg, opts) {
   for (const id of ADMIN_IDS) {
-    await bot.telegram.sendMessage(id, msg, opts).catch(() => {});
+    await bot.sendMessage(id, msg, opts || {}).catch(() => {});
   }
 }
 
-function ss(ctx) {
-  return getSession(ctx.from.id) || {};
-}
-
-function ws(ctx, state) {
-  saveSession(ctx.from.id, { ...ss(ctx), ...state });
-}
-
-function ds(ctx) {
-  deleteSession(ctx.from.id);
-}
-
-// Genera próximos N días hábiles (martes=2, jueves=4) a partir de hoy
 function getProximosDias(n) {
-  const raw = getConfig('dias_atencion');
-  const dias = JSON.parse(raw || '[2,4]');
+  const dias = JSON.parse(getConfig('dias_atencion') || '[2,4]');
   const result = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  let d = new Date(today);
-  d.setDate(d.getDate() + 1); // empezar mañana
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 1);
   while (result.length < n) {
     if (dias.includes(d.getDay())) {
       const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
       result.push({
         fecha: `${yyyy}-${mm}-${dd}`,
-        nombre: d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+        nombre: d.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' })
       });
     }
-    d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate()+1);
   }
   return result;
-}
-
-// Horarios disponibles para un día dado
-function getSlotsDisponibles(fecha) {
-  const horaInicio = parseInt(getConfig('hora_inicio') || '17');
-  const horaFin = parseInt(getConfig('hora_fin') || '22');
-  const maxTurnos = parseInt(getConfig('turnos_por_dia') || '5');
-  const slots = [];
-  for (let h = horaInicio; h < horaFin; h++) {
-    const hora = `${String(h).padStart(2, '0')}:00`;
-    if (!isSlotBloqueado(fecha, hora)) slots.push(hora);
-  }
-  const ocupados = getTurnosCountByFecha(fecha);
-  const libres = slots.filter((_, i) => i < maxTurnos);
-  return libres.filter((h) => {
-    return !isSlotBloqueado(fecha, h);
-  }).slice(0, Math.max(0, maxTurnos - ocupados + slots.length));
-
-  // Simpler: return all slots not already booked
 }
 
 function getSlotsLibres(fecha) {
@@ -94,475 +65,499 @@ function getSlotsLibres(fecha) {
   const horaFin = parseInt(getConfig('hora_fin') || '22');
   const maxTurnos = parseInt(getConfig('turnos_por_dia') || '5');
   const { db } = require('./db');
-  const ocupadas = db.prepare("SELECT hora FROM turnos WHERE fecha = ? AND estado != 'cancelado' AND es_urgencia = 0").all(fecha).map(r => r.hora);
+  const ocupadas = db.prepare("SELECT hora FROM turnos WHERE fecha=? AND estado!='cancelado' AND es_urgencia=0").all(fecha).map(r=>r.hora);
   const slots = [];
   for (let h = horaInicio; h < horaFin; h++) {
-    const hora = `${String(h).padStart(2, '0')}:00`;
+    const hora = `${String(h).padStart(2,'0')}:00`;
     if (!ocupadas.includes(hora) && !isSlotBloqueado(fecha, hora)) slots.push(hora);
   }
   return slots.slice(0, maxTurnos);
 }
 
 function formatTurno(t) {
-  const tipoLabel = t.tipo === 'CONTROL_MARCAPASOS' ? '💓 Control Marcapasos' : '🩺 Consulta';
-  const fecha = new Date(t.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  return `${tipoLabel}\n📅 ${fecha}\n🕐 ${t.hora}hs\n👤 ${t.nombre || 'Sin nombre'}\n📱 ${t.telefono || '—'}`;
+  const tipo = t.tipo === 'CONTROL_MARCAPASOS' ? '💓 Marcapasos' : '🩺 Consulta';
+  const fecha = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+  return `${tipo}\n📅 ${fecha}\n🕐 ${t.hora}hs\n👤 ${t.nombre||'Sin nombre'}\n📱 ${t.telefono||'—'}`;
 }
 
-function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T12:00:00');
-  d.setDate(d.getDate() + n);
-  return d.toISOString().split('T')[0];
-}
-
-// ─── Flujo paciente ──────────────────────────────────────────────────────────
-
-bot.start(async (ctx) => {
-  ds(ctx);
-  ws(ctx, { step: 'P1' });
-  await ctx.reply(
-    `👋 Bienvenido al sistema de turnos del *Dr. Rolando Pantich*\n_Cardiólogo_\n\n📅 Atención: Martes y Jueves de 17 a 22hs\n\n¿Es la *primera vez* que se atiende con el Doctor?`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('✨ Sí, es la primera vez', 'P1:SI_PRIMERA_VEZ')],
-        [Markup.button.callback('📋 No, ya soy paciente del Dr.', 'P1:NO_YA_ATENDIDO')]
-      ])
-    }
-  );
-});
-
-bot.command('cancelar', async (ctx) => {
-  ds(ctx);
-  const turnos = getTurnosByChatId(ctx.from.id);
-  if (!turnos.length) return ctx.reply('No tenés turnos pendientes.');
-  const btns = turnos.map(t => {
-    const fecha = new Date(t.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
-    return [Markup.button.callback(`❌ ${fecha} ${t.hora}hs - ${t.tipo === 'CONTROL_MARCAPASOS' ? 'Marcapasos' : 'Consulta'}`, `CANCELAR:${t.id}`)];
+function mostrarCalendario(chatId) {
+  const dias = getProximosDias(6);
+  const rows = dias.map(d => {
+    const slots = getSlotsLibres(d.fecha);
+    const label = slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`;
+    return [btn(label, slots.length ? `DIA:${d.fecha}` : 'LLENO')];
   });
-  btns.push([Markup.button.callback('↩️ Volver', 'CANCELAR:NADA')]);
-  await ctx.reply('¿Cuál turno querés cancelar?', Markup.inlineKeyboard(btns));
-});
+  bot.sendMessage(chatId, '📅 *Seleccioná un día:*', { parse_mode:'Markdown', ...kb(rows) });
+}
 
-bot.command('mis_turnos', async (ctx) => {
-  const turnos = getTurnosByChatId(ctx.from.id);
-  if (!turnos.length) return ctx.reply('No tenés turnos pendientes.\n\nUsá /start para agendar uno.');
-  const txt = turnos.map(t => formatTurno(t)).join('\n\n─────────────────\n\n');
-  await ctx.reply(`📋 *Tus turnos:*\n\n${txt}`, { parse_mode: 'Markdown' });
-});
+// ─── Comandos ────────────────────────────────────────────────────────────────
 
-bot.command('ayuda', async (ctx) => {
-  await ctx.reply(
-    `*Comandos disponibles:*\n\n/start — Agendar turno\n/mis\\_turnos — Ver mis turnos\n/cancelar — Cancelar un turno\n/ayuda — Este mensaje`,
-    { parse_mode: 'Markdown' }
+bot.onText(/\/start/, (msg) => {
+  const id = msg.chat.id;
+  ds(id);
+  ws(id, { step:'P1' });
+  bot.sendMessage(id,
+    '👋 Bienvenido al sistema de turnos del *Dr\\. Rolando Pantich*\n_Cardiólogo_\n\n📅 Atención: Martes y Jueves de 17 a 22hs\n\n¿Es la *primera vez* que se atiende con el Doctor?',
+    { parse_mode:'MarkdownV2', ...kb([
+      [btn('✨ Sí, es la primera vez','P1:SI_PRIMERA_VEZ')],
+      [btn('📋 No, ya soy paciente','P1:NO_YA_ATENDIDO')]
+    ])}
   );
 });
 
-// ─── Callbacks flujo ────────────────────────────────────────────────────────
+bot.onText(/\/mis_turnos/, (msg) => {
+  const id = msg.chat.id;
+  const turnos = getTurnosByChatId(id);
+  if (!turnos.length) return bot.sendMessage(id, 'No tenés turnos pendientes.\n\nUsá /start para agendar uno.');
+  const txt = turnos.map(t => formatTurno(t)).join('\n\n─────────────\n\n');
+  bot.sendMessage(id, `📋 *Tus turnos:*\n\n${txt}`, { parse_mode:'Markdown' });
+});
 
-bot.action(/^P1:(.+)$/, async (ctx) => {
-  const val = ctx.match[1];
-  ws(ctx, { p1: val, step: 'P2' });
-  await ctx.editMessageText(
-    `${val === 'SI_PRIMERA_VEZ' ? '✨ Primera vez — ¡Bienvenido!' : '📋 Paciente existente'}\n\n¿De dónde es usted?`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('🏙 Corrientes Capital', 'P2:CORRIENTES_CAPITAL')],
-      [Markup.button.callback('🚜 Interior de la Provincia', 'P2:INTERIOR_PROVINCIA')],
-      [Markup.button.callback('✈️ Otra provincia / país', 'P2:OTRA_PROVINCIA_PAIS')]
+bot.onText(/\/cancelar/, (msg) => {
+  const id = msg.chat.id;
+  ds(id);
+  const turnos = getTurnosByChatId(id);
+  if (!turnos.length) return bot.sendMessage(id, 'No tenés turnos pendientes.');
+  const rows = turnos.map(t => {
+    const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
+    return [btn(`❌ ${f} ${t.hora}hs`, `CANCELAR:${t.id}`)];
+  });
+  rows.push([btn('↩️ Volver','CANCELAR:NADA')]);
+  bot.sendMessage(id, '¿Cuál turno querés cancelar?', kb(rows));
+});
+
+bot.onText(/\/ayuda/, (msg) => {
+  bot.sendMessage(msg.chat.id,
+    '*Comandos:*\n\n/start — Agendar turno\n/mis\\_turnos — Ver mis turnos\n/cancelar — Cancelar turno\n/ayuda — Este mensaje',
+    { parse_mode:'Markdown' }
+  );
+});
+
+bot.onText(/\/admin/, (msg) => {
+  if (!isAdmin(msg.chat.id)) return bot.sendMessage(msg.chat.id,'⛔ Acceso denegado.');
+  bot.sendMessage(msg.chat.id, '👨‍⚕️ *Panel Dr\\. Pantich*', {
+    parse_mode:'MarkdownV2',
+    ...kb([
+      [btn('📋 Turnos hoy','ADMIN:HOY'), btn('📅 Agenda 7 días','ADMIN:AGENDA')],
+      [btn('🔒 Bloquear slot','ADMIN:BLOQUEAR'), btn('⚙️ Config','ADMIN:CONFIG')],
+      [btn('🔑 Vincular Calendar','ADMIN:AUTH')]
     ])
-  );
-});
-
-bot.action(/^P2:(.+)$/, async (ctx) => {
-  const val = ctx.match[1];
-  ws(ctx, { p2: val });
-  if (val === 'CORRIENTES_CAPITAL') {
-    ws(ctx, { step: 'P3' });
-    await ctx.editMessageText(
-      '🏙 Corrientes Capital\n\n¿Cuál es el motivo de la consulta?',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('💓 Control Marcapasos', 'P3:CONTROL_MARCAPASOS')],
-        [Markup.button.callback('🩺 Consulta Cardiológica', 'P3:CONSULTA_SIMPLE')]
-      ])
-    );
-  } else {
-    ws(ctx, { step: 'P2_TEXT' });
-    const label = val === 'INTERIOR_PROVINCIA' ? '¿De qué localidad?' : '¿De qué provincia o país?';
-    await ctx.editMessageText(`${val === 'INTERIOR_PROVINCIA' ? '🚜 Interior de la Provincia' : '✈️ Otra provincia/país'}\n\n${label}\n\n_(Escribí la respuesta)_`, { parse_mode: 'Markdown' });
-  }
-});
-
-bot.action(/^P3:(.+)$/, async (ctx) => {
-  const val = ctx.match[1];
-  ws(ctx, { p3: val });
-  if (val === 'CONTROL_MARCAPASOS') {
-    ws(ctx, { step: 'NOMBRE' });
-    await ctx.editMessageText('💓 Control Marcapasos\n\n¿Cuál es tu nombre completo?\n\n_(Escribilo)_', { parse_mode: 'Markdown' });
-  } else {
-    ws(ctx, { step: 'P3_DERIVACION' });
-    await ctx.editMessageText(
-      '🩺 Consulta Cardiológica\n\n¿Venís derivado por un colega?',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Sí, vengo derivado', 'DERIVACION:SI')],
-        [Markup.button.callback('❌ No', 'DERIVACION:NO')]
-      ])
-    );
-  }
-});
-
-bot.action(/^DERIVACION:(.+)$/, async (ctx) => {
-  const val = ctx.match[1];
-  ws(ctx, { derivado: val === 'SI' });
-  if (val === 'SI') {
-    ws(ctx, { step: 'P3_COLEGA' });
-    await ctx.editMessageText('👨‍⚕️ ¿Cuál es el nombre del médico que te derivó?\n\n_(Escribí el nombre)_', { parse_mode: 'Markdown' });
-  } else {
-    ws(ctx, { step: 'NOMBRE' });
-    await ctx.editMessageText('¿Cuál es tu nombre completo?\n\n_(Escribilo)_', { parse_mode: 'Markdown' });
-  }
-});
-
-bot.action(/^CANCELAR:(.+)$/, async (ctx) => {
-  const id = ctx.match[1];
-  if (id === 'NADA') return ctx.editMessageText('↩️ Cancelación abortada.');
-  const t = getTurnoById(parseInt(id));
-  if (!t || String(t.chat_id) !== String(ctx.from.id)) return ctx.editMessageText('Turno no encontrado.');
-  cancelarTurno(t.id);
-  if (t.gcal_event_id) await eliminarEvento(t.gcal_event_id).catch(() => {});
-  const fecha = new Date(t.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  await ctx.editMessageText(`✅ Turno cancelado:\n📅 ${fecha} — ${t.hora}hs`);
-  await notifyAdmins(`🔴 Turno cancelado:\n${formatTurno(t)}`);
-});
-
-// Selección de día del calendario
-bot.action(/^DIA:(.+)$/, async (ctx) => {
-  const fecha = ctx.match[1];
-  const slots = getSlotsLibres(fecha);
-  if (!slots.length) {
-    ws(ctx, { step: 'CALENDARIO' });
-    return ctx.answerCbQuery('⚠️ Ese día no tiene turnos disponibles. Elegí otro.');
-  }
-  ws(ctx, { selectedFecha: fecha, step: 'HORARIO' });
-  const d = new Date(fecha + 'T12:00:00');
-  const nombreDia = d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const btns = slots.map(h => [Markup.button.callback(`🕐 ${h}hs`, `HORA:${h}`)]);
-  btns.push([Markup.button.callback('↩️ Cambiar día', 'BACK:CALENDARIO')]);
-  await ctx.editMessageText(`📅 *${nombreDia}*\n\nElegí el horario:`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(btns) });
-});
-
-bot.action(/^HORA:(.+)$/, async (ctx) => {
-  const hora = ctx.match[1];
-  const session = ss(ctx);
-  ws(ctx, { selectedHora: hora, step: 'CONFIRMACION' });
-  const d = new Date(session.selectedFecha + 'T12:00:00');
-  const nombreDia = d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const tipoLabel = session.p3 === 'CONTROL_MARCAPASOS' ? '💓 Control Marcapasos' : '🩺 Consulta Cardiológica';
-  await ctx.editMessageText(
-    `📋 *Resumen del turno:*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${hora}hs\n👤 ${session.nombre}\n📱 ${session.telefono}\n\n¿Confirmás?`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Confirmar turno', 'CONFIRMAR:SI')],
-        [Markup.button.callback('❌ Cancelar', 'CONFIRMAR:NO')]
-      ])
-    }
-  );
-});
-
-bot.action(/^CONFIRMAR:(.+)$/, async (ctx) => {
-  const val = ctx.match[1];
-  if (val === 'NO') {
-    ds(ctx);
-    return ctx.editMessageText('❌ Turno cancelado. Usá /start para comenzar de nuevo.');
-  }
-  const session = ss(ctx);
-  await ctx.editMessageText('⏳ Guardando turno...');
-  const res = saveTurno({
-    chat_id: String(ctx.from.id),
-    nombre: session.nombre,
-    telefono: session.telefono,
-    fecha: session.selectedFecha,
-    hora: session.selectedHora,
-    tipo: session.p3,
-    p1: session.p1,
-    p2: session.p2,
-    p2_extra: session.p2Extra || '',
-    derivado: session.derivado ? 1 : 0,
-    nombre_colega: session.nombreColega || '',
-    es_urgencia: 0
   });
-  const turnoId = res.lastInsertRowid;
-  ds(ctx);
-  const d = new Date(session.selectedFecha + 'T12:00:00');
-  const nombreDia = d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const tipoLabel = session.p3 === 'CONTROL_MARCAPASOS' ? '💓 Control Marcapasos' : '🩺 Consulta Cardiológica';
-  await ctx.editMessageText(
-    `✅ *Turno confirmado #${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${session.selectedHora}hs\n\nTe esperamos en el consultorio.\nPara cancelar usá /cancelar`,
-    { parse_mode: 'Markdown' }
+});
+
+bot.onText(/\/hoy/, (msg) => {
+  if (!isAdmin(msg.chat.id)) return;
+  const turnos = getTurnosHoy();
+  if (!turnos.length) return bot.sendMessage(msg.chat.id,'📭 Sin turnos hoy.');
+  const txt = turnos.map((t,i) => `${i+1}. ${t.hora}hs — ${t.nombre||'?'} | ${t.tipo==='CONTROL_MARCAPASOS'?'💓':'🩺'} | ${t.telefono||'—'}${t.es_urgencia?' 🚨':''}`).join('\n');
+  bot.sendMessage(msg.chat.id, `📋 *Hoy (${new Date().toLocaleDateString('es-AR')}):*\n\n${txt}`, {parse_mode:'Markdown'});
+});
+
+bot.onText(/\/agenda/, (msg) => {
+  if (!isAdmin(msg.chat.id)) return;
+  const dias = parseInt((msg.text||'').split(' ')[1]) || 7;
+  const turnos = getProximosTurnos(dias);
+  if (!turnos.length) return bot.sendMessage(msg.chat.id,`📭 Sin turnos próximos.`);
+  const grupos = {};
+  for (const t of turnos) { if (!grupos[t.fecha]) grupos[t.fecha]=[]; grupos[t.fecha].push(t); }
+  let txt = '';
+  for (const [fecha, ts] of Object.entries(grupos)) {
+    const d = new Date(fecha+'T12:00:00');
+    txt += `\n*${d.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'short'})}*\n`;
+    txt += ts.map(t=>`  • ${t.hora}hs ${t.tipo==='CONTROL_MARCAPASOS'?'💓':'🩺'} ${t.nombre||'?'} (${t.telefono||'—'})`).join('\n');
+  }
+  bot.sendMessage(msg.chat.id, `📅 *Agenda ${dias} días:*\n${txt}`, {parse_mode:'Markdown'});
+});
+
+bot.onText(/\/config/, (msg) => {
+  if (!isAdmin(msg.chat.id)) return;
+  const id = msg.chat.id;
+  bot.sendMessage(id,
+    `⚙️ *Configuración:*\n\n• Horario: ${getConfig('hora_inicio')}:00 — ${getConfig('hora_fin')}:00\n• Turnos/día: ${getConfig('turnos_por_dia')}\n• Urgencias: ${getConfig('cupos_urgencia')}`,
+    { parse_mode:'Markdown', ...kb([
+      [btn('🕐 Hora inicio','CFG:hora_inicio'), btn('🕐 Hora fin','CFG:hora_fin')],
+      [btn('📋 Turnos/día','CFG:turnos_por_dia'), btn('🚨 Urgencias','CFG:cupos_urgencia')]
+    ])}
   );
-  // Google Calendar
-  const turnoData = { id: turnoId, ...session, fecha: session.selectedFecha, hora: session.selectedHora, tipo: session.p3, p2_extra: session.p2Extra || '' };
-  crearEvento(turnoData).then(ev => {
-    if (ev && ev.id) setTurnoGcalId(turnoId, ev.id);
-  }).catch(() => {});
-  // Notificar al Dr.
-  const msgAdmin = `🆕 *Nuevo turno #${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${session.selectedHora}hs\n👤 ${session.nombre}\n📱 ${session.telefono}\n📍 ${session.p2 === 'CORRIENTES_CAPITAL' ? 'Corrientes Capital' : session.p2Extra}`;
-  await notifyAdmins(msgAdmin, { parse_mode: 'Markdown' });
 });
 
-bot.action('BACK:CALENDARIO', async (ctx) => {
-  const session = ss(ctx);
-  ws(ctx, { step: 'CALENDARIO', selectedFecha: null });
-  await mostrarCalendario(ctx, session);
+bot.onText(/\/auth/, async (msg) => {
+  if (!isAdmin(msg.chat.id)) return;
+  const url = getAuthUrl();
+  bot.sendMessage(msg.chat.id, `🔑 *Vincular Google Calendar*\n\nAbrí este link en el navegador del servidor:\n${url}`, {parse_mode:'Markdown'});
+  waitForCode(300000)
+    .then(async code => { await exchangeCode(code); notify('✅ Google Calendar vinculado.'); })
+    .catch(() => {});
 });
 
-// ─── Manejo de texto ─────────────────────────────────────────────────────────
+// ─── Texto libre ─────────────────────────────────────────────────────────────
 
-bot.on('text', async (ctx) => {
-  const session = ss(ctx);
-  const text = ctx.message.text.trim();
+bot.on('message', (msg) => {
+  if (!msg.text || msg.text.startsWith('/')) return;
+  const id = msg.chat.id;
+  const text = msg.text.trim();
+  const session = ss(id);
   if (!session.step) return;
 
-  // Admin: código OAuth
-  if (session.step === 'ADMIN_AUTH_CODE' && isAdmin(ctx)) {
-    try {
-      const tokens = await exchangeCode(text);
-      ds(ctx);
-      await ctx.reply('✅ Google Calendar vinculado correctamente.');
-    } catch (e) {
-      await ctx.reply(`❌ Error: ${e.message}`);
+  if (session.step === 'ADMIN_BLOQUEAR_FECHA' && isAdmin(id)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return bot.sendMessage(id,'Formato inválido. Usá AAAA-MM-DD');
+    ws(id, { step:'ADMIN_BLOQUEAR_HORA', bloquearFecha:text });
+    return bot.sendMessage(id,`Fecha: ${text}\n¿Qué hora bloqueás? (ej: 18:00)`);
+  }
+  if (session.step === 'ADMIN_BLOQUEAR_HORA' && isAdmin(id)) {
+    if (!/^\d{2}:\d{2}$/.test(text)) return bot.sendMessage(id,'Formato inválido. Usá HH:MM');
+    bloquearSlot(session.bloquearFecha, text, 'admin');
+    ds(id);
+    return bot.sendMessage(id,`✅ Slot ${session.bloquearFecha} ${text}hs bloqueado.`);
+  }
+  if (session.step === 'ADMIN_REJ_MOTIVO' && isAdmin(id)) {
+    const { rejTurnoId, rejPatientId, rejFecha, rejHora } = session;
+    const motivo = text.toLowerCase() === 'no' ? '' : text;
+    ds(id);
+    bot.sendMessage(id, `✅ Paciente notificado del rechazo.`);
+    const motivoTxt = motivo ? `\n\n_Motivo: ${motivo}_` : '';
+    bot.sendMessage(rejPatientId,
+      `❌ *Tu turno no pudo confirmarse*\n\n📅 ${rejFecha} — ${rejHora}hs${motivoTxt}\n\nPodés intentar con otro horario usando /start`,
+      {parse_mode:'Markdown'}
+    ).catch(()=>{});
+    return;
+  }
+
+  if (session.step === 'ADMIN_CONFIG_VALUE' && isAdmin(id)) {
+    setConfig(session.configKey, text);
+    ds(id);
+    return bot.sendMessage(id,`✅ ${session.configKey} = ${text}`);
+  }
+
+  switch (session.step) {
+    case 'P2_TEXT':
+      ws(id, { p2Extra:text, step:'P3' });
+      bot.sendMessage(id,'¿Cuál es el motivo de la consulta?', kb([
+        [btn('💓 Control Marcapasos','P3:CONTROL_MARCAPASOS')],
+        [btn('🩺 Consulta Cardiológica','P3:CONSULTA_SIMPLE')]
+      ]));
+      break;
+    case 'P3_COLEGA':
+      ws(id, { nombreColega:text, step:'NOMBRE' });
+      bot.sendMessage(id,'¿Cuál es tu nombre completo?');
+      break;
+    case 'NOMBRE':
+      ws(id, { nombre:text, step:'TELEFONO' });
+      bot.sendMessage(id,'¿Cuál es tu número de WhatsApp? (con código de área, ej: 3794123456)');
+      break;
+    case 'TELEFONO':
+      ws(id, { telefono:text, step:'CALENDARIO' });
+      mostrarCalendario(id);
+      break;
+  }
+});
+
+// ─── Callbacks inline ────────────────────────────────────────────────────────
+
+bot.on('callback_query', async (query) => {
+  const id = query.message.chat.id;
+  const msgId = query.message.message_id;
+  const data = query.data;
+  const session = ss(id);
+
+  const edit = (text, opts) => bot.editMessageText(text, { chat_id:id, message_id:msgId, parse_mode:'Markdown', ...(opts||{}) });
+  bot.answerCallbackQuery(query.id).catch(()=>{});
+
+  // P1
+  if (data.startsWith('P1:')) {
+    const val = data.split(':')[1];
+    ws(id, { p1:val, step:'P2' });
+    edit(`${val==='SI_PRIMERA_VEZ'?'✨ Primera vez — ¡Bienvenido!':'📋 Paciente existente'}\n\n¿De dónde es usted?`, kb([
+      [btn('🏙 Corrientes Capital','P2:CORRIENTES_CAPITAL')],
+      [btn('🚜 Interior de la Provincia','P2:INTERIOR_PROVINCIA')],
+      [btn('✈️ Otra provincia / país','P2:OTRA_PROVINCIA_PAIS')]
+    ]));
+    return;
+  }
+
+  // P2
+  if (data.startsWith('P2:')) {
+    const val = data.split(':')[1];
+    ws(id, { p2:val });
+    if (val === 'CORRIENTES_CAPITAL') {
+      ws(id, { step:'P3' });
+      edit('🏙 Corrientes Capital\n\n¿Cuál es el motivo de la consulta?', kb([
+        [btn('💓 Control Marcapasos','P3:CONTROL_MARCAPASOS')],
+        [btn('🩺 Consulta Cardiológica','P3:CONSULTA_SIMPLE')]
+      ]));
+    } else {
+      ws(id, { step:'P2_TEXT' });
+      const label = val==='INTERIOR_PROVINCIA' ? '¿De qué localidad?' : '¿De qué provincia o país?';
+      edit(`${val==='INTERIOR_PROVINCIA'?'🚜 Interior':'✈️ Otra provincia/país'}\n\n${label}\n_(escribí la respuesta)_`);
     }
     return;
   }
 
-  // Admin: bloquear slot
-  if (session.step === 'ADMIN_BLOQUEAR_FECHA' && isAdmin(ctx)) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return ctx.reply('Formato inválido. Usá AAAA-MM-DD');
-    ws(ctx, { step: 'ADMIN_BLOQUEAR_HORA', bloquearFecha: text });
-    return ctx.reply(`Fecha: ${text}\n¿Qué hora bloqueás? (ej: 18:00)`);
+  // P3
+  if (data.startsWith('P3:')) {
+    const val = data.split(':')[1];
+    ws(id, { p3:val });
+    if (val === 'CONTROL_MARCAPASOS') {
+      ws(id, { step:'NOMBRE' });
+      edit('💓 Control Marcapasos\n\n¿Cuál es tu nombre completo?\n_(escribilo)_');
+    } else {
+      ws(id, { step:'P3_DERIVACION' });
+      edit('🩺 Consulta Cardiológica\n\n¿Venís derivado por un colega?', kb([
+        [btn('✅ Sí, vengo derivado','DERIVACION:SI')],
+        [btn('❌ No','DERIVACION:NO')]
+      ]));
+    }
+    return;
   }
 
-  if (session.step === 'ADMIN_BLOQUEAR_HORA' && isAdmin(ctx)) {
-    if (!/^\d{2}:\d{2}$/.test(text)) return ctx.reply('Formato inválido. Usá HH:MM');
-    bloquearSlot(session.bloquearFecha, text, 'admin');
-    ds(ctx);
-    return ctx.reply(`✅ Slot ${session.bloquearFecha} ${text}hs bloqueado.`);
+  // Derivación
+  if (data.startsWith('DERIVACION:')) {
+    const val = data.split(':')[1];
+    ws(id, { derivado: val==='SI' });
+    if (val==='SI') {
+      ws(id, { step:'P3_COLEGA' });
+      edit('👨‍⚕️ ¿Cuál es el nombre del médico que te derivó?\n_(escribilo)_');
+    } else {
+      ws(id, { step:'NOMBRE' });
+      edit('¿Cuál es tu nombre completo?\n_(escribilo)_');
+    }
+    return;
   }
 
-  if (session.step === 'ADMIN_CONFIG_VALUE' && isAdmin(ctx)) {
-    setConfig(session.configKey, text);
-    ds(ctx);
-    return ctx.reply(`✅ Configuración guardada: ${session.configKey} = ${text}`);
+  // Día calendario
+  if (data === 'LLENO') {
+    bot.answerCallbackQuery(query.id, { text:'⚠️ Ese día no tiene turnos.' }).catch(()=>{});
+    return;
+  }
+  if (data.startsWith('DIA:')) {
+    const fecha = data.split(':')[1];
+    const slots = getSlotsLibres(fecha);
+    if (!slots.length) {
+      bot.answerCallbackQuery(query.id, { text:'⚠️ Sin turnos disponibles ese día.' }).catch(()=>{});
+      return;
+    }
+    ws(id, { selectedFecha:fecha, step:'HORARIO' });
+    const nombreDia = new Date(fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const rows = slots.map(h => [btn(`🕐 ${h}hs`, `HORA:${h}`)]);
+    rows.push([btn('↩️ Cambiar día','BACK:CALENDARIO')]);
+    edit(`📅 *${nombreDia}*\n\nElegí el horario:`, kb(rows));
+    return;
   }
 
-  // Flujo paciente
-  switch (session.step) {
-    case 'P2_TEXT': {
-      ws(ctx, { p2Extra: text, step: 'P3' });
-      await ctx.reply(
-        '¿Cuál es el motivo de la consulta?',
-        Markup.inlineKeyboard([
-          [Markup.button.callback('💓 Control Marcapasos', 'P3:CONTROL_MARCAPASOS')],
-          [Markup.button.callback('🩺 Consulta Cardiológica', 'P3:CONSULTA_SIMPLE')]
-        ])
-      );
-      break;
+  // Hora
+  if (data.startsWith('HORA:')) {
+    const hora = data.split(':').slice(1).join(':');
+    ws(id, { selectedHora:hora, step:'CONFIRMACION' });
+    const s = ss(id);
+    const nombreDia = new Date(s.selectedFecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const tipoLabel = s.p3==='CONTROL_MARCAPASOS'?'💓 Control Marcapasos':'🩺 Consulta Cardiológica';
+    edit(`📋 *Resumen del turno:*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${hora}hs\n👤 ${s.nombre}\n📱 ${s.telefono}\n\n¿Confirmás?`, kb([
+      [btn('✅ Confirmar turno','CONFIRMAR:SI')],
+      [btn('❌ Cancelar','CONFIRMAR:NO')]
+    ]));
+    return;
+  }
+
+  // Confirmar
+  if (data.startsWith('CONFIRMAR:')) {
+    const val = data.split(':')[1];
+    if (val==='NO') { ds(id); edit('❌ Turno cancelado. Usá /start para empezar de nuevo.'); return; }
+    const s = ss(id);
+    edit('⏳ Guardando turno...');
+    const res = saveTurno({
+      chat_id:String(id), nombre:s.nombre, telefono:s.telefono,
+      fecha:s.selectedFecha, hora:s.selectedHora, tipo:s.p3,
+      p1:s.p1, p2:s.p2, p2_extra:s.p2Extra||'',
+      derivado:s.derivado?1:0, nombre_colega:s.nombreColega||'', es_urgencia:0
+    });
+    const turnoId = res.lastInsertRowid;
+    ds(id);
+    const nombreDia = new Date(s.selectedFecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const tipoLabel = s.p3==='CONTROL_MARCAPASOS'?'💓 Control Marcapasos':'🩺 Consulta Cardiológica';
+    edit(`⏳ *Turno enviado \\#${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${s.selectedHora}hs\n\nEl Dr\\. revisará y te confirmará a la brevedad\\.\nPara cancelar usá /cancelar`);
+    // Google Calendar async
+    crearEvento({ id:turnoId, ...s, fecha:s.selectedFecha, hora:s.selectedHora, tipo:s.p3, p2_extra:s.p2Extra||'' })
+      .then(ev => { if (ev && ev.id) setTurnoGcalId(turnoId, ev.id); })
+      .catch(()=>{});
+    // Notificar admins con botones de gestión
+    const origen = s.p2==='CORRIENTES_CAPITAL'?'Corrientes Capital':s.p2Extra||s.p2;
+    const adminMsg = `🆕 *Nuevo turno \\#${turnoId}*\n\n${tipoLabel}\n📅 ${nombreDia}\n🕐 ${s.selectedHora}hs\n👤 ${s.nombre}\n📱 ${s.telefono}\n📍 ${origen}\n\n_Esperando confirmación_`;
+    const adminKb = kb([
+      [btn('✅ Confirmar','ADMIN_OK:'+turnoId+':'+id), btn('❌ Rechazar','ADMIN_REJ:'+turnoId+':'+id)],
+      [btn('🔄 Reprogramar','ADMIN_REP:'+turnoId+':'+id)]
+    ]);
+    for (const adminId of ADMIN_IDS) {
+      bot.sendMessage(adminId, adminMsg, { parse_mode:'MarkdownV2', ...adminKb }).catch(()=>{});
     }
-    case 'P3_COLEGA': {
-      ws(ctx, { nombreColega: text, step: 'NOMBRE' });
-      await ctx.reply('¿Cuál es tu nombre completo?\n_(Escribilo)_', { parse_mode: 'Markdown' });
-      break;
+    return;
+  }
+
+  // Cancelar turno
+  if (data.startsWith('CANCELAR:')) {
+    const turnoId = data.split(':')[1];
+    if (turnoId==='NADA') { edit('↩️ Cancelación abortada.'); return; }
+    const t = getTurnoById(parseInt(turnoId));
+    if (!t || String(t.chat_id)!==String(id)) { edit('Turno no encontrado.'); return; }
+    cancelarTurno(t.id);
+    if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
+    const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    edit(`✅ Turno cancelado:\n📅 ${f} — ${t.hora}hs`);
+    notify(`🔴 Turno cancelado:\n${formatTurno(t)}`);
+    return;
+  }
+
+  // Volver al calendario
+  if (data==='BACK:CALENDARIO') {
+    ws(id, { step:'CALENDARIO', selectedFecha:null });
+    bot.deleteMessage(id, msgId).catch(()=>{});
+    mostrarCalendario(id);
+    return;
+  }
+
+  // ── Gestión de turnos por admin ──────────────────────────────────────────
+
+  if (data.startsWith('ADMIN_OK:')) {
+    if (!isAdmin(id)) return;
+    const [, turnoId, patientId] = data.split(':');
+    const t = getTurnoById(parseInt(turnoId));
+    if (!t) { edit('Turno no encontrado.'); return; }
+    updateTurnoEstado(t.id, 'confirmado');
+    const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const tipo = t.tipo==='CONTROL_MARCAPASOS'?'💓 Control Marcapasos':'🩺 Consulta Cardiológica';
+    edit(`✅ *Turno \\#${turnoId} confirmado*\n\n${tipo}\n📅 ${f}\n🕐 ${t.hora}hs\n👤 ${t.nombre}`);
+    bot.sendMessage(patientId,
+      `✅ *Tu turno fue confirmado\\!*\n\n${tipo}\n📅 ${f}\n🕐 ${t.hora}hs\n\nTe esperamos en el consultorio\\.`,
+      {parse_mode:'MarkdownV2'}
+    ).catch(()=>{});
+    return;
+  }
+
+  if (data.startsWith('ADMIN_REJ:')) {
+    if (!isAdmin(id)) return;
+    const [, turnoId, patientId] = data.split(':');
+    const t = getTurnoById(parseInt(turnoId));
+    if (!t) { edit('Turno no encontrado.'); return; }
+    updateTurnoEstado(t.id, 'rechazado');
+    if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
+    const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    ws(id, { step:'ADMIN_REJ_MOTIVO', rejTurnoId:turnoId, rejPatientId:patientId, rejFecha:f, rejHora:t.hora });
+    edit(`❌ Turno #${turnoId} rechazado.\n\n¿Querés enviarle un motivo al paciente? _(escribilo o mandá "no")_`);
+    return;
+  }
+
+  if (data.startsWith('ADMIN_REP:')) {
+    if (!isAdmin(id)) return;
+    const [, turnoId, patientId] = data.split(':');
+    const t = getTurnoById(parseInt(turnoId));
+    if (!t) { edit('Turno no encontrado.'); return; }
+    ws(id, { step:'ADMIN_REP_DIA', repTurnoId:parseInt(turnoId), repPatientId:patientId });
+    const dias = getProximosDias(6);
+    const rows = dias.map(d => {
+      const slots = getSlotsLibres(d.fecha);
+      const label = slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`;
+      return [btn(label, slots.length ? `REPDIA:${d.fecha}` : 'LLENO')];
+    });
+    bot.deleteMessage(id, msgId).catch(()=>{});
+    bot.sendMessage(id, `🔄 *Reprogramar turno \\#${turnoId}*\n\nElegí el nuevo día:`, {parse_mode:'MarkdownV2', ...kb(rows)});
+    return;
+  }
+
+  if (data.startsWith('REPDIA:')) {
+    if (!isAdmin(id)) return;
+    const fecha = data.split(':')[1];
+    const slots = getSlotsLibres(fecha);
+    if (!slots.length) { bot.answerCallbackQuery(query.id,{text:'Sin turnos ese día.'}).catch(()=>{}); return; }
+    ws(id, { ...session, repFecha:fecha });
+    const nombreDia = new Date(fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const rows = slots.map(h => [btn(`🕐 ${h}hs`, `REPHORA:${h}`)]);
+    edit(`📅 *${nombreDia}*\n\nElegí el nuevo horario:`, kb(rows));
+    return;
+  }
+
+  if (data.startsWith('REPHORA:')) {
+    if (!isAdmin(id)) return;
+    const hora = data.split(':').slice(1).join(':');
+    const { repTurnoId, repPatientId, repFecha } = session;
+    const t = getTurnoById(repTurnoId);
+    if (!t) { edit('Turno no encontrado.'); return; }
+    reprogramarTurno(repTurnoId, repFecha, hora);
+    ds(id);
+    const f = new Date(repFecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+    const tipo = t.tipo==='CONTROL_MARCAPASOS'?'💓 Control Marcapasos':'🩺 Consulta Cardiológica';
+    edit(`🔄 *Turno \\#${repTurnoId} reprogramado*\n\n${tipo}\n📅 ${f}\n🕐 ${hora}hs\n👤 ${t.nombre}`);
+    // Notificar paciente
+    bot.sendMessage(repPatientId,
+      `🔄 *Tu turno fue reprogramado*\n\n${tipo}\n📅 ${f}\n🕐 ${hora}hs\n\nTe esperamos en el consultorio\\.`,
+      {parse_mode:'MarkdownV2'}
+    ).catch(()=>{});
+    // Actualizar Google Calendar
+    if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
+    crearEvento({...t, fecha:repFecha, hora, id:repTurnoId, p2_extra:t.p2_extra||''})
+      .then(ev => { if (ev?.id) setTurnoGcalId(repTurnoId, ev.id); })
+      .catch(()=>{});
+    return;
+  }
+
+  // Admin callbacks
+  if (data==='ADMIN:HOY') {
+    if (!isAdmin(id)) return;
+    const turnos = getTurnosHoy();
+    if (!turnos.length) { edit('📭 Sin turnos hoy.'); return; }
+    const txt = turnos.map((t,i)=>`${i+1}. ${t.hora}hs — ${t.nombre||'?'} | ${t.tipo==='CONTROL_MARCAPASOS'?'💓':'🩺'} | ${t.telefono||'—'}`).join('\n');
+    edit(`📋 *Hoy (${new Date().toLocaleDateString('es-AR')}):*\n\n${txt}`);
+    return;
+  }
+  if (data==='ADMIN:AGENDA') {
+    if (!isAdmin(id)) return;
+    const turnos = getProximosTurnos(7);
+    if (!turnos.length) { edit('📭 Sin turnos próximos.'); return; }
+    const grupos = {};
+    for (const t of turnos) { if (!grupos[t.fecha]) grupos[t.fecha]=[]; grupos[t.fecha].push(t); }
+    let txt = '';
+    for (const [fecha,ts] of Object.entries(grupos)) {
+      const d = new Date(fecha+'T12:00:00');
+      txt += `\n*${d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'})}*\n`;
+      txt += ts.map(t=>`  ${t.hora}hs ${t.tipo==='CONTROL_MARCAPASOS'?'💓':'🩺'} ${t.nombre||'?'}`).join('\n');
     }
-    case 'NOMBRE': {
-      ws(ctx, { nombre: text, step: 'TELEFONO' });
-      await ctx.reply('¿Cuál es tu número de teléfono (WhatsApp)?\n_(Escribilo con código de área, ej: 3794123456)_', { parse_mode: 'Markdown' });
-      break;
-    }
-    case 'TELEFONO': {
-      ws(ctx, { telefono: text, step: 'CALENDARIO' });
-      await mostrarCalendario(ctx, { ...session, telefono: text });
-      break;
-    }
-    default:
-      break;
+    edit(`📅 *Próximos 7 días:*\n${txt}`);
+    return;
+  }
+  if (data==='ADMIN:BLOQUEAR') {
+    if (!isAdmin(id)) return;
+    ws(id, { step:'ADMIN_BLOQUEAR_FECHA' });
+    edit('📅 ¿Qué fecha bloqueás? (AAAA-MM-DD)');
+    return;
+  }
+  if (data==='ADMIN:CONFIG') {
+    if (!isAdmin(id)) return;
+    edit(`⚙️ *Config actual:*\n\n• Horario: ${getConfig('hora_inicio')}:00 — ${getConfig('hora_fin')}:00\n• Turnos/día: ${getConfig('turnos_por_dia')}\n• Urgencias: ${getConfig('cupos_urgencia')}`, kb([
+      [btn('🕐 Hora inicio','CFG:hora_inicio'), btn('🕐 Hora fin','CFG:hora_fin')],
+      [btn('📋 Turnos/día','CFG:turnos_por_dia'), btn('🚨 Urgencias','CFG:cupos_urgencia')]
+    ]));
+    return;
+  }
+  if (data==='ADMIN:AUTH') {
+    if (!isAdmin(id)) return;
+    const url = getAuthUrl();
+    edit(`🔑 Abrí este link en el navegador del servidor:\n${url}`);
+    waitForCode(300000)
+      .then(async code => { await exchangeCode(code); notify('✅ Google Calendar vinculado.'); })
+      .catch(()=>{});
+    return;
+  }
+  if (data.startsWith('CFG:')) {
+    if (!isAdmin(id)) return;
+    const key = data.split(':')[1];
+    const labels = { hora_inicio:'hora de inicio (ej: 17)', hora_fin:'hora de fin (ej: 22)', turnos_por_dia:'turnos por día (ej: 5)', cupos_urgencia:'cupos de urgencia (ej: 2)' };
+    ws(id, { step:'ADMIN_CONFIG_VALUE', configKey:key });
+    edit(`✏️ Nuevo valor para *${labels[key]||key}*:`);
+    return;
   }
 });
 
-async function mostrarCalendario(ctx, session) {
-  const dias = getProximosDias(6);
-  const btns = dias.map(d => {
-    const slots = getSlotsLibres(d.fecha);
-    const label = slots.length ? `📅 ${d.nombre} (${slots.length} turnos)` : `❌ ${d.nombre} — sin turnos`;
-    return [Markup.button.callback(label, slots.length ? `DIA:${d.fecha}` : 'DIA_LLENO')];
-  });
-  const method = ctx.callbackQuery ? ctx.editMessageText.bind(ctx) : ctx.reply.bind(ctx);
-  await method('📅 *Seleccioná un día:*', { parse_mode: 'Markdown', ...Markup.inlineKeyboard(btns) });
-}
+// ─── Start ────────────────────────────────────────────────────────────────────
 
-bot.action('DIA_LLENO', async (ctx) => {
-  await ctx.answerCbQuery('⚠️ Ese día no tiene turnos disponibles.');
-});
+bot.on('polling_error', (err) => console.error('POLLING ERR:', err.code, err.message));
 
-// ─── Comandos Admin ───────────────────────────────────────────────────────────
-
-function adminOnly(fn) {
-  return async (ctx) => {
-    if (!isAdmin(ctx)) return ctx.reply('⛔ Acceso denegado.');
-    return fn(ctx);
-  };
-}
-
-bot.command('hoy', adminOnly(async (ctx) => {
-  const turnos = getTurnosHoy();
-  if (!turnos.length) return ctx.reply('📭 Sin turnos hoy.');
-  const txt = turnos.map((t, i) => `${i + 1}. ${t.hora}hs — ${t.nombre || '?'} | ${t.tipo === 'CONTROL_MARCAPASOS' ? '💓' : '🩺'} | ${t.telefono || '—'}${t.es_urgencia ? ' 🚨' : ''}`).join('\n');
-  await ctx.reply(`📋 *Turnos de hoy (${new Date().toLocaleDateString('es-AR')}):*\n\n${txt}`, { parse_mode: 'Markdown' });
-}));
-
-bot.command('agenda', adminOnly(async (ctx) => {
-  const args = ctx.message.text.split(' ');
-  const dias = parseInt(args[1]) || 7;
-  const turnos = getProximosTurnos(dias);
-  if (!turnos.length) return ctx.reply(`📭 Sin turnos en los próximos ${dias} días.`);
-  const grupos = {};
-  for (const t of turnos) {
-    if (!grupos[t.fecha]) grupos[t.fecha] = [];
-    grupos[t.fecha].push(t);
-  }
-  let txt = '';
-  for (const [fecha, ts] of Object.entries(grupos)) {
-    const d = new Date(fecha + 'T12:00:00');
-    const label = d.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'short' });
-    txt += `\n*${label}*\n`;
-    txt += ts.map(t => `  • ${t.hora}hs ${t.tipo === 'CONTROL_MARCAPASOS' ? '💓' : '🩺'} ${t.nombre || '?'} (${t.telefono || '—'})`).join('\n');
-    txt += '\n';
-  }
-  await ctx.reply(`📅 *Agenda — próximos ${dias} días:*\n${txt}`, { parse_mode: 'Markdown' });
-}));
-
-bot.command('bloquear', adminOnly(async (ctx) => {
-  ws(ctx, { step: 'ADMIN_BLOQUEAR_FECHA' });
-  await ctx.reply('📅 ¿Qué fecha bloqueás?\nFormato: AAAA-MM-DD\n(Ej: 2025-09-23)');
-}));
-
-bot.command('desbloquear', adminOnly(async (ctx) => {
-  const args = ctx.message.text.split(' ');
-  if (args.length < 3) return ctx.reply('Uso: /desbloquear AAAA-MM-DD HH:MM');
-  desbloquearSlot(args[1], args[2]);
-  await ctx.reply(`✅ Slot ${args[1]} ${args[2]}hs desbloqueado.`);
-}));
-
-bot.command('auth', adminOnly(async (ctx) => {
-  const url = getAuthUrl();
-  await ctx.reply(
-    `🔑 *Vincular Google Calendar*\n\n1. Abrí este enlace en tu navegador:\n${url}\n\n2. Autorizá el acceso\n3. El sistema se autoriza automáticamente via callback local`,
-    { parse_mode: 'Markdown' }
-  );
-  waitForCode(300000)
-    .then(async (code) => {
-      await exchangeCode(code);
-      await ctx.reply('✅ Google Calendar vinculado correctamente.');
-    })
-    .catch(() => {});
-}));
-
-bot.command('config', adminOnly(async (ctx) => {
-  await ctx.reply(
-    `⚙️ *Configuración*\n\nValores actuales:\n• Días atención: ${getConfig('dias_atencion')} (2=Mar, 4=Jue)\n• Horario: ${getConfig('hora_inicio')}:00 — ${getConfig('hora_fin')}:00\n• Turnos/día: ${getConfig('turnos_por_dia')}\n• Cupos urgencia: ${getConfig('cupos_urgencia')}\n• Calendar ID: ${getConfig('google_calendar_id')}`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🕐 Hora inicio', 'CFG:hora_inicio'), Markup.button.callback('🕐 Hora fin', 'CFG:hora_fin')],
-        [Markup.button.callback('📅 Turnos/día', 'CFG:turnos_por_dia'), Markup.button.callback('🚨 Cupos urgencia', 'CFG:cupos_urgencia')],
-        [Markup.button.callback('📆 Calendar ID', 'CFG:google_calendar_id')]
-      ])
-    }
-  );
-}));
-
-bot.action(/^CFG:(.+)$/, adminOnly(async (ctx) => {
-  const key = ctx.match[1];
-  const labels = {
-    hora_inicio: 'hora de inicio (ej: 17)',
-    hora_fin: 'hora de fin (ej: 22)',
-    turnos_por_dia: 'cantidad de turnos por día (ej: 5)',
-    cupos_urgencia: 'cupos de urgencia por día (ej: 2)',
-    google_calendar_id: 'ID del calendario (ej: primary o email@gmail.com)'
-  };
-  ws(ctx, { step: 'ADMIN_CONFIG_VALUE', configKey: key });
-  await ctx.editMessageText(`✏️ Ingresá el nuevo valor para *${labels[key] || key}*:`, { parse_mode: 'Markdown' });
-}));
-
-bot.command('admin', adminOnly(async (ctx) => {
-  await ctx.reply(
-    `👨‍⚕️ *Panel Dr. Pantich*`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📋 Hoy', 'ADMIN:HOY'), Markup.button.callback('📅 Agenda 7 días', 'ADMIN:AGENDA')],
-        [Markup.button.callback('🔒 Bloquear slot', 'ADMIN:BLOQUEAR'), Markup.button.callback('⚙️ Config', 'ADMIN:CONFIG')],
-        [Markup.button.callback('🔑 Vincular Calendar', 'ADMIN:AUTH')]
-      ])
-    }
-  );
-}));
-
-bot.action('ADMIN:HOY', adminOnly(async (ctx) => {
-  const turnos = getTurnosHoy();
-  if (!turnos.length) return ctx.editMessageText('📭 Sin turnos hoy.');
-  const txt = turnos.map((t, i) => `${i + 1}. ${t.hora}hs — ${t.nombre || '?'} | ${t.tipo === 'CONTROL_MARCAPASOS' ? '💓' : '🩺'} | ${t.telefono || '—'}${t.es_urgencia ? ' 🚨' : ''}`).join('\n');
-  await ctx.editMessageText(`📋 *Hoy (${new Date().toLocaleDateString('es-AR')}):*\n\n${txt}`, { parse_mode: 'Markdown' });
-}));
-
-bot.action('ADMIN:AGENDA', adminOnly(async (ctx) => {
-  const turnos = getProximosTurnos(7);
-  if (!turnos.length) return ctx.editMessageText('📭 Sin turnos próximos.');
-  const grupos = {};
-  for (const t of turnos) { if (!grupos[t.fecha]) grupos[t.fecha] = []; grupos[t.fecha].push(t); }
-  let txt = '';
-  for (const [fecha, ts] of Object.entries(grupos)) {
-    const d = new Date(fecha + 'T12:00:00');
-    txt += `\n*${d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}*\n`;
-    txt += ts.map(t => `  ${t.hora}hs ${t.tipo === 'CONTROL_MARCAPASOS' ? '💓' : '🩺'} ${t.nombre || '?'}`).join('\n');
-  }
-  await ctx.editMessageText(`📅 *Próximos 7 días:*\n${txt}`, { parse_mode: 'Markdown' });
-}));
-
-bot.action('ADMIN:BLOQUEAR', adminOnly(async (ctx) => {
-  ws(ctx, { step: 'ADMIN_BLOQUEAR_FECHA' });
-  await ctx.editMessageText('📅 ¿Qué fecha bloqueás? (formato AAAA-MM-DD)');
-}));
-
-bot.action('ADMIN:CONFIG', adminOnly(async (ctx) => {
-  await ctx.editMessageText(
-    `⚙️ *Configuración actual:*\n\n• Horario: ${getConfig('hora_inicio')}:00 — ${getConfig('hora_fin')}:00\n• Turnos/día: ${getConfig('turnos_por_dia')}\n• Cupos urgencia: ${getConfig('cupos_urgencia')}`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🕐 Hora inicio', 'CFG:hora_inicio'), Markup.button.callback('🕐 Hora fin', 'CFG:hora_fin')],
-        [Markup.button.callback('📋 Turnos/día', 'CFG:turnos_por_dia'), Markup.button.callback('🚨 Urgencias', 'CFG:cupos_urgencia')]
-      ])
-    }
-  );
-}));
-
-bot.action('ADMIN:AUTH', adminOnly(async (ctx) => {
-  const url = getAuthUrl();
-  await ctx.editMessageText(`🔑 Abrí este enlace en el navegador del servidor:\n\n${url}\n\nEl sistema captura el código automáticamente.`);
-  waitForCode(300000)
-    .then(async (code) => {
-      await exchangeCode(code);
-      await notifyAdmins('✅ Google Calendar vinculado.');
-    })
-    .catch(() => {});
-}));
-
-// ─── Launch ──────────────────────────────────────────────────────────────────
-
-bot.launch().then(() => {
-  console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
-  notifyAdmins('🟢 Bot iniciado').catch(() => {});
-});
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
+notify('🟢 Bot iniciado').catch(()=>{});

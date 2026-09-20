@@ -1,4 +1,4 @@
-const Database = require('better-sqlite3');
+const Database = require('../node_modules/better-sqlite3');
 const path = require('path');
 
 const db = new Database(path.join(__dirname, 'rolo-turnos.db'));
@@ -70,7 +70,7 @@ function getSession(chatId) {
 }
 
 function saveSession(chatId, state) {
-  db.prepare('INSERT OR REPLACE INTO sessions (chat_id, state, updated_at) VALUES (?, ?, datetime("now","localtime"))').run(String(chatId), JSON.stringify(state));
+  db.prepare("INSERT OR REPLACE INTO sessions (chat_id, state, updated_at) VALUES (?, ?, datetime('now','localtime'))").run(String(chatId), JSON.stringify(state));
 }
 
 function deleteSession(chatId) {
@@ -79,9 +79,17 @@ function deleteSession(chatId) {
 
 function saveTurno(data) {
   return db.prepare(`
-    INSERT INTO turnos (chat_id, nombre, telefono, fecha, hora, tipo, p1, p2, p2_extra, derivado, nombre_colega, es_urgencia)
-    VALUES (@chat_id, @nombre, @telefono, @fecha, @hora, @tipo, @p1, @p2, @p2_extra, @derivado, @nombre_colega, @es_urgencia)
+    INSERT INTO turnos (chat_id, nombre, telefono, fecha, hora, tipo, p1, p2, p2_extra, derivado, nombre_colega, es_urgencia, estado)
+    VALUES (@chat_id, @nombre, @telefono, @fecha, @hora, @tipo, @p1, @p2, @p2_extra, @derivado, @nombre_colega, @es_urgencia, 'pendiente_confirmacion')
   `).run(data);
+}
+
+function updateTurnoEstado(id, estado) {
+  db.prepare("UPDATE turnos SET estado=? WHERE id=?").run(estado, id);
+}
+
+function reprogramarTurno(id, fecha, hora) {
+  db.prepare("UPDATE turnos SET fecha=?, hora=?, estado='confirmado' WHERE id=?").run(fecha, hora, id);
 }
 
 function setTurnoGcalId(id, eventId) {
@@ -148,7 +156,7 @@ function getUrgenciasCountHoy(fecha) {
 module.exports = {
   db, getConfig, setConfig,
   getSession, saveSession, deleteSession,
-  saveTurno, setTurnoGcalId,
+  saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
   getTurnosByFecha, getTurnosByChatId,
   cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy,
