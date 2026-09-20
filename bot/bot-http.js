@@ -4,7 +4,7 @@ const {
   saveTurno, setTurnoGcalId, updateTurnoEstado,
   isSlotBloqueado, getTurnosCountByFecha
 } = require('./db');
-const { crearEvento } = require('./calendar');
+const { crearEvento, resolveOAuthCode, exchangeCode } = require('./calendar');
 
 const PORT = parseInt(process.env.PORT || process.env.HTTP_PORT || '3850');
 
@@ -73,6 +73,20 @@ function startHttpServer(bot, ADMIN_IDS) {
     if (req.method === 'OPTIONS') { json(res, {}, 200); return; }
 
     if (url.pathname === '/ping') { json(res, {ok:true, ts:Date.now()}); return; }
+
+    // GET /oauth2callback — Google OAuth redirect
+    if (req.method === 'GET' && url.pathname === '/oauth2callback') {
+      const code = url.searchParams.get('code');
+      if (!code) { res.writeHead(400); res.end('Código no recibido'); return; }
+      const resolved = resolveOAuthCode(code);
+      if (!resolved) {
+        // Auto-exchange if no pending waitForCode
+        exchangeCode(code).catch(() => {});
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<h2 style="font-family:sans-serif;color:green;padding:40px">✅ Autorización completada. Podés cerrar esta pestaña y volver a Telegram.</h2>');
+      return;
+    }
 
     // GET /api/dias
     if (req.method === 'GET' && url.pathname === '/api/dias') {

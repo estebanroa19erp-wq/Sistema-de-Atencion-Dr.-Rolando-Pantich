@@ -1,16 +1,18 @@
 const { google } = require('googleapis');
-const http = require('http');
 const { getConfig, setConfig } = require('./db');
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
-const REDIRECT_PORT = process.env.OAUTH_PORT || 9876;
-const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
+
+function getRedirectUri() {
+  const base = process.env.TUNNEL_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:9876';
+  return base.replace(/\/$/, '') + '/oauth2callback';
+}
 
 function getClient() {
   const client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
+    getRedirectUri()
   );
   const token = getConfig('google_refresh_token');
   if (token) client.setCredentials({ refresh_token: token });
@@ -25,26 +27,30 @@ function getAuthUrl() {
   });
 }
 
+let _pendingResolve = null;
+let _pendingReject = null;
+let _pendingTimer = null;
+
 function waitForCode(timeoutMs) {
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://localhost:${REDIRECT_PORT}`);
-      const code = url.searchParams.get('code');
-      if (code) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end('<h2 style="font-family:sans-serif;color:green">✅ Autorización completada. Podés cerrar esta pestaña.</h2>');
-        server.close();
-        resolve(code);
-      } else {
-        res.writeHead(400);
-        res.end('Código no recibido');
-        server.close();
-        reject(new Error('No code in callback'));
-      }
-    });
-    server.listen(REDIRECT_PORT, '127.0.0.1');
-    setTimeout(() => { server.close(); reject(new Error('Timeout OAuth')); }, timeoutMs || 300000);
+    _pendingResolve = resolve;
+    _pendingReject = reject;
+    _pendingTimer = setTimeout(() => {
+      _pendingResolve = _pendingReject = _pendingTimer = null;
+      reject(new Error('Timeout OAuth'));
+    }, timeoutMs || 300000);
   });
+}
+
+function resolveOAuthCode(code) {
+  if (_pendingResolve) {
+    clearTimeout(_pendingTimer);
+    const fn = _pendingResolve;
+    _pendingResolve = _pendingReject = _pendingTimer = null;
+    fn(code);
+    return true;
+  }
+  return false;
 }
 
 async function exchangeCode(code) {
@@ -118,4 +124,4 @@ async function listarEventos(desde, hasta) {
   return resp.data.items || [];
 }
 
-module.exports = { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento, listarEventos };
+module.exports = { getAuthUrl, waitForCode, resolveOAuthCode, exchangeCode, crearEvento, eliminarEvento, listarEventos };
