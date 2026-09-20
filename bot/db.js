@@ -2,7 +2,7 @@ const Database = require('libsql');
 const path = require('path');
 
 const DB_PATH = path.join(
-  process.env.FLY_APP_NAME ? '/data' : __dirname,
+  process.env.DATA_DIR || (process.env.FLY_APP_NAME ? '/data' : __dirname),
   'rolo-turnos.db'
 );
 const dbOpts = process.env.TURSO_URL

@@ -1,0 +1,46 @@
+services:
+  - name: rolo-pantich-bot
+    type: worker
+    git:
+      repository: github.com/estebanroa19erp-wq/Sistema-de-Atencion-Dr.-Rolando-Pantich
+      branch: main
+      build_command: cd bot && npm ci
+      run_command: node bot/rolo-bot.js
+    instance_type: free
+    regions:
+      - was
+    ports:
+      - port: 3850
+        protocol: http
+    health_checks:
+      - grace_period: 30
+        interval: 30
+        restart_limit: 3
+        path: /ping
+        port: 3850
+        protocol: http
+        timeout: 5
+    env:
+      - key: PORT
+        value: "3850"
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_URL
+        value: https://sparkling-lake-e9b6.repantich.workers.dev
+      - key: BOT_TOKEN
+        secret: true
+      - key: ADMIN_CHAT_IDS
+        secret: true
+      - key: GOOGLE_CLIENT_ID
+        secret: true
+      - key: GOOGLE_CLIENT_SECRET
+        secret: true
+      - key: TURSO_URL
+        secret: true
+      - key: TURSO_TOKEN
+        secret: true
+      - key: DATA_DIR
+        value: /data
+    volumes:
+      - id: rolo-data
+        path: /data
