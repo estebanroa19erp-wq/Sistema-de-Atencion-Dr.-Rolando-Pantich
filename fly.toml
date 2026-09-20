@@ -1,0 +1,28 @@
+app = "rolo-pantich-bot"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HTTP_PORT = "3850"
+  NODE_ENV = "production"
+
+[[mounts]]
+  source = "rolo_data"
+  destination = "/data"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3850
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
