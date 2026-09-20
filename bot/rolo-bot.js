@@ -8,7 +8,7 @@ const {
   getTurnosByChatId, cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy, getTurnosPendientes,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
-  getTurnosCountByFecha,
+  getTurnosCountByFecha, getHorasOcupadas,
   syncDB
 } = require('./db');
 syncDB().catch(() => {});
@@ -67,8 +67,7 @@ function getSlotsLibres(fecha) {
   const horaInicio = parseInt(getConfig('hora_inicio') || '17');
   const horaFin = parseInt(getConfig('hora_fin') || '22');
   const maxTurnos = parseInt(getConfig('turnos_por_dia') || '5');
-  const { db } = require('./db');
-  const ocupadas = db.prepare("SELECT hora FROM turnos WHERE fecha=? AND estado!='cancelado' AND es_urgencia=0").all(fecha).map(r=>r.hora);
+  const ocupadas = getHorasOcupadas(fecha);
   const slots = [];
   for (let h = horaInicio; h < horaFin; h++) {
     const hora = `${String(h).padStart(2,'0')}:00`;

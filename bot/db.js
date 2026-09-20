@@ -109,6 +109,10 @@ function getTurnosPendientes() {
   return _turnos.filter(t => t.estado === 'pendiente_confirmacion').sort((a,b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
 }
 
+function getHorasOcupadas(fecha) {
+  return _turnos.filter(t => t.fecha === fecha && t.estado !== 'cancelado' && !t.es_urgencia).map(t => t.hora);
+}
+
 function getTurnosCountByFecha(fecha) {
   return _turnos.filter(t => t.fecha === fecha && t.estado !== 'cancelado' && !t.es_urgencia).length;
 }
@@ -138,5 +142,5 @@ module.exports = {
   cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
-  getTurnosCountByFecha, getUrgenciasCountHoy
+  getHorasOcupadas, getTurnosCountByFecha, getUrgenciasCountHoy
 };
