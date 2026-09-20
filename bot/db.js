@@ -143,6 +143,10 @@ function desbloquearSlot(fecha, hora) {
   db.prepare('DELETE FROM slots_bloqueados WHERE fecha = ? AND hora = ?').run(fecha, hora);
 }
 
+function getTurnosPendientes() {
+  return db.prepare("SELECT * FROM turnos WHERE estado='pendiente_confirmacion' ORDER BY fecha,hora").all();
+}
+
 function getTurnosCountByFecha(fecha) {
   const row = db.prepare("SELECT COUNT(*) as c FROM turnos WHERE fecha = ? AND estado != 'cancelado' AND es_urgencia = 0").get(fecha);
   return row ? row.c : 0;
@@ -157,6 +161,7 @@ module.exports = {
   db, getConfig, setConfig,
   getSession, saveSession, deleteSession,
   saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
+  getTurnosPendientes,
   getTurnosByFecha, getTurnosByChatId,
   cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy,

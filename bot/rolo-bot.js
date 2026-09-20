@@ -6,7 +6,7 @@ const {
   getSession, saveSession, deleteSession,
   saveTurno, setTurnoGcalId, updateTurnoEstado, reprogramarTurno,
   getTurnosByChatId, cancelarTurno, getTurnoById,
-  getProximosTurnos, getTurnosHoy,
+  getProximosTurnos, getTurnosHoy, getTurnosPendientes,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
   getTurnosCountByFecha
 } = require('./db');
@@ -134,16 +134,25 @@ bot.onText(/\/ayuda/, (msg) => {
   );
 });
 
-bot.onText(/\/admin/, (msg) => {
-  if (!isAdmin(msg.chat.id)) return bot.sendMessage(msg.chat.id,'⛔ Acceso denegado.');
-  bot.sendMessage(msg.chat.id, '👨‍⚕️ *Panel Dr\\. Pantich*', {
-    parse_mode:'MarkdownV2',
+function enviarPanel(chatId) {
+  const hoy = getTurnosHoy();
+  const pendientes = getTurnosPendientes();
+  const hoyCount = hoy.length;
+  const pendCount = pendientes.length;
+  const txt = `👨‍⚕️ *Panel Dr. Pantich*\n\n📋 Hoy: *${hoyCount}* turno${hoyCount!==1?'s':''}\n⏳ Pendientes de confirmación: *${pendCount}*`;
+  return bot.sendMessage(chatId, txt, {
+    parse_mode:'Markdown',
     ...kb([
-      [btn('📋 Turnos hoy','ADMIN:HOY'), btn('📅 Agenda 7 días','ADMIN:AGENDA')],
-      [btn('🔒 Bloquear slot','ADMIN:BLOQUEAR'), btn('⚙️ Config','ADMIN:CONFIG')],
-      [btn('🔑 Vincular Calendar','ADMIN:AUTH')]
+      [btn(`⏳ Pendientes (${pendCount})`, 'ADMIN:PENDIENTES'), btn('📋 Hoy', 'ADMIN:HOY')],
+      [btn('📅 Agenda 7 días', 'ADMIN:AGENDA'), btn('🔒 Bloquear slot', 'ADMIN:BLOQUEAR')],
+      [btn('⚙️ Config', 'ADMIN:CONFIG'), btn('🔑 Vincular Calendar', 'ADMIN:AUTH')]
     ])
   });
+}
+
+bot.onText(/\/admin/, (msg) => {
+  if (!isAdmin(msg.chat.id)) return bot.sendMessage(msg.chat.id,'⛔ Acceso denegado.');
+  enviarPanel(msg.chat.id);
 });
 
 bot.onText(/\/hoy/, (msg) => {
@@ -500,6 +509,20 @@ bot.on('callback_query', async (query) => {
   }
 
   // Admin callbacks
+  if (data==='ADMIN:PENDIENTES') {
+    if (!isAdmin(id)) return;
+    const pend = getTurnosPendientes();
+    if (!pend.length) { edit('✅ Sin pendientes.'); return; }
+    let txt = `⏳ *Pendientes de confirmación (${pend.length}):*\n\n`;
+    for (const t of pend) {
+      const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'short'});
+      txt += `• #${t.id} ${f} ${t.hora}hs — ${t.nombre||'?'} | ${t.telefono||'—'}\n`;
+      txt += `  ${t.tipo==='CONTROL_MARCAPASOS'?'💓 Marcapasos':'🩺 Consulta'}${t.derivado?' (derivado)':''}\n\n`;
+    }
+    txt += 'Respondé cada turno con los botones que mandó el bot al recibirlo.';
+    edit(txt);
+    return;
+  }
   if (data==='ADMIN:HOY') {
     if (!isAdmin(id)) return;
     const turnos = getTurnosHoy();
