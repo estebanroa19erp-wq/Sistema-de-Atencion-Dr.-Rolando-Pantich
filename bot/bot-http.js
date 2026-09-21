@@ -2,7 +2,7 @@ const http = require('http');
 const {
   getConfig, setConfig,
   saveTurno, setTurnoGcalId, updateTurnoEstado,
-  isSlotBloqueado, getTurnosCountByFecha
+  isSlotBloqueado, getTurnosCountByFecha, getHorasOcupadas
 } = require('./db');
 const { crearEvento, resolveOAuthCode, exchangeCode } = require('./calendar');
 
@@ -56,8 +56,7 @@ function getProximosDias(n, bot) {
 function getSlotsLibres(fecha) {
   const horaInicio = parseInt(getConfig('hora_inicio') || '17');
   const horaFin = parseInt(getConfig('hora_fin') || '22');
-  const { db } = require('./db');
-  const ocupadas = db.prepare("SELECT hora FROM turnos WHERE fecha=? AND estado NOT IN ('cancelado','rechazado')").all(fecha).map(r => r.hora);
+  const ocupadas = getHorasOcupadas(fecha);
   const slots = [];
   for (let h = horaInicio; h < horaFin; h++) {
     const hora = `${String(h).padStart(2,'0')}:00`;
