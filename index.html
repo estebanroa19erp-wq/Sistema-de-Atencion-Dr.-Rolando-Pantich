@@ -28,7 +28,9 @@
         .days-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
         .day-card{background:var(--light-gray);border:2px solid transparent;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all 0.3s}
         .day-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
-        .day-card.active{background:#E0F7FA;border-color:var(--primary)}
+        .day-card.active{background:var(--primary);border-color:var(--primary-dark);color:white}
+        .day-card.active .day-name{color:rgba(255,255,255,0.85)}
+        .day-card.active .day-slots{background:rgba(255,255,255,0.25)}
         .day-name{font-size:12px;font-weight:600;color:var(--gray);text-transform:uppercase;margin-bottom:4px}
         .day-date{font-size:18px;font-weight:700;margin-bottom:8px}
         .day-slots{font-size:12px;padding:4px 12px;border-radius:12px;background:#27AE60;color:white;display:inline-block}
@@ -468,7 +470,8 @@
 
         function seleccionarDia(fecha,nombre,el){
             document.querySelectorAll('.day-card').forEach(c=>c.classList.remove('active'));
-            el.classList.add('active');
+            const card=el.closest('.day-card')||el;
+            card.classList.add('active');
             state.selectedDay={fecha,nombre};
             document.getElementById('slotsSection').classList.remove('hidden');
             generarHorarios();

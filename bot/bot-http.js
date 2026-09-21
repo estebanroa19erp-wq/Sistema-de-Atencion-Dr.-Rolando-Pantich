@@ -32,7 +32,9 @@ function getProximosDias(n, bot) {
   const dias = JSON.parse(getConfig('dias_atencion') || '[2,4]');
   const result = [];
   const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+1);
-  while (result.length < n) {
+  let checked = 0;
+  while (result.length < n && checked < 90) {
+    checked++;
     if (dias.includes(d.getDay())) {
       const fecha = d.toISOString().split('T')[0];
       const count = getTurnosCountByFecha(fecha);
@@ -91,7 +93,7 @@ function startHttpServer(bot, ADMIN_IDS) {
 
     // GET /api/dias
     if (req.method === 'GET' && url.pathname === '/api/dias') {
-      const dias = getProximosDias(6, bot);
+      const dias = getProximosDias(8, bot);
       json(res, { ok: true, dias }); return;
     }
 
