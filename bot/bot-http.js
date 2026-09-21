@@ -40,13 +40,15 @@ function getProximosDias(n, bot) {
       const horaInicio = parseInt(getConfig('hora_inicio') || '17');
       const horaFin = parseInt(getConfig('hora_fin') || '22');
       const totalSlots = horaFin - horaInicio;
-      const libres = Math.max(0, totalSlots - count);
-      result.push({
-        fecha,
-        nombre: d.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' }),
-        diaSemana: ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][d.getDay()],
-        cupos: libres
-      });
+      const libres = Math.max(0, Math.min(totalSlots, max) - count);
+      if (libres > 0) {
+        result.push({
+          fecha,
+          nombre: d.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' }),
+          diaSemana: ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][d.getDay()],
+          cupos: libres
+        });
+      }
     }
     d.setDate(d.getDate()+1);
   }
