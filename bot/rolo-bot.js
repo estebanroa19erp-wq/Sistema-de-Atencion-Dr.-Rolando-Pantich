@@ -488,19 +488,21 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('REPHORA:')) {
     if (!isAdmin(id)) return;
     const hora = data.split(':').slice(1).join(':');
-    const { repTurnoId, repPatientId, repFecha } = session;
-    const t = getTurnoById(repTurnoId);
-    if (!t) { edit('Turno no encontrado.'); return; }
+    const { repTurnoId, repPatientId, repFecha, repTurno } = session;
+    const t = getTurnoById(repTurnoId) || repTurno;
+    if (!t) { edit('Turno no encontrado. Enviá el turno nuevamente desde el formulario.'); return; }
     reprogramarTurno(repTurnoId, repFecha, hora);
     ds(id);
     const f = new Date(repFecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
     const tipo = t.tipo==='CONTROL_MARCAPASOS'?'💓 Control Marcapasos':'🩺 Consulta Cardiológica';
     edit(`🔄 *Turno \\#${repTurnoId} reprogramado*\n\n${tipo}\n📅 ${f}\n🕐 ${hora}hs\n👤 ${t.nombre}`);
-    // Notificar paciente
-    bot.sendMessage(repPatientId,
-      `🔄 *Tu turno fue reprogramado*\n\n${tipo}\n📅 ${f}\n🕐 ${hora}hs\n\nTe esperamos en el consultorio\\.`,
-      {parse_mode:'MarkdownV2'}
-    ).catch(()=>{});
+    // Notificar paciente solo si vino por Telegram (no web)
+    if (repPatientId && repPatientId !== 'WEB') {
+      bot.sendMessage(repPatientId,
+        `🔄 *Tu turno fue reprogramado*\n\n${tipo}\n📅 ${f}\n🕐 ${hora}hs\n\nTe esperamos en el consultorio\\.`,
+        {parse_mode:'MarkdownV2'}
+      ).catch(()=>{});
+    }
     // Actualizar Google Calendar
     if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
     crearEvento({...t, fecha:repFecha, hora, id:repTurnoId, p2_extra:t.p2_extra||''})
@@ -650,13 +652,21 @@ bot.on('callback_query', async (query) => {
 
   if (data.startsWith('WEB_REJ:')) {
     updateTurnoEstado(turnoId, 'rechazado');
-    if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
+    // Borrar evento Calendar: usar gcal_event_id si existe, sino buscar por fecha+nombre
+    if (t.gcal_event_id) {
+      eliminarEvento(t.gcal_event_id).catch(()=>{});
+    } else {
+      listarEventos(t.fecha, t.fecha).then(evs => {
+        const ev = evs.find(e => (e.summary||'').includes(t.nombre) || (e.description||'').includes(`#${turnoId}`));
+        if (ev?.id) eliminarEvento(ev.id).catch(()=>{});
+      }).catch(()=>{});
+    }
     edit(`❌ Turno WEB #${turnoId} rechazado.\n👤 ${t.nombre} — 📱 ${t.telefono}\n\nAvisar al paciente.`);
     return;
   }
 
   if (data.startsWith('WEB_REP:')) {
-    ws(id, { step:'ADMIN_REP_DIA', repTurnoId:turnoId, repPatientId:'WEB' });
+    ws(id, { step:'ADMIN_REP_DIA', repTurnoId:turnoId, repPatientId:'WEB', repTurno: t });
     const dias = getProximosDias(6);
     const rows = dias.map(d => {
       const slots = getSlotsLibres(d.fecha);
