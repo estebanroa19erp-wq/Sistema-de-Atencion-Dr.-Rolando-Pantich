@@ -589,27 +589,66 @@ bot.on('callback_query', async (query) => {
   const data = query.data;
   if (!data.startsWith('WEB_')) return;
   bot.answerCallbackQuery(query.id).catch(()=>{});
-  if (!isAdmin(id)) return;
+  if (!isAdmin(id)) { bot.answerCallbackQuery(query.id, { text: 'No autorizado' }).catch(()=>{}); return; }
   const msgId = query.message.message_id;
-  const edit = (text) => bot.editMessageText(text, { chat_id:id, message_id:msgId }).catch(()=>{});
+  const msgText = query.message.text || '';
+  const edit = (text) => bot.editMessageText(text, { chat_id:id, message_id:msgId }).catch(e => console.error('edit err:', e.message));
+
+  const turnoId = parseInt(data.split(':')[1]);
+  let t = getTurnoById(turnoId);
+
+  // Si turno no está en memoria (bot reiniciado), reconstruir desde texto del mensaje
+  if (!t) {
+    const nombreM = msgText.match(/👤 (.+)/);
+    const telM = msgText.match(/📱 (.+)/);
+    const horaM = msgText.match(/🕐 (\d{2}:\d{2})/);
+    const fechaM = msgText.match(/(\d{4}-\d{2}-\d{2})/);
+    // Intentar extraer fecha de la línea 📅 parseando el texto
+    const fechaDesdeMsg = (() => {
+      const linea = msgText.split('\n').find(l => l.includes('📅'));
+      if (!linea) return null;
+      // formato "martes, 27 de octubre" → buscar en próximos 90 días
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      for (let i = 1; i <= 90; i++) {
+        const d2 = new Date(hoy.getTime() + i*864e5);
+        const label = d2.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
+        if (linea.includes(label.split(',')[0]) && linea.includes(String(d2.getDate()))) {
+          return d2.toISOString().slice(0,10);
+        }
+      }
+      return null;
+    })();
+    if (nombreM && telM && horaM) {
+      t = {
+        id: turnoId, chat_id: 'WEB',
+        nombre: nombreM[1].trim(), telefono: telM[1].trim(),
+        fecha: fechaDesdeMsg || new Date(Date.now()+864e5).toISOString().slice(0,10),
+        hora: horaM[1],
+        tipo: msgText.includes('Marcapasos') ? 'CONTROL_MARCAPASOS' : 'CONSULTA_SIMPLE',
+        p1: '', p2: 'CORRIENTES_CAPITAL', p2_extra: '', derivado: 0, nombre_colega: '',
+        es_urgencia: 0, estado: 'pendiente_confirmacion', gcal_event_id: null
+      };
+      console.log(`WEB_* turno #${turnoId} reconstruido desde mensaje`);
+    } else {
+      edit(`⚠️ Turno #${turnoId} no encontrado en memoria.\nEl bot reinició desde que llegó este turno.\n\nRevisar el Calendar del Dr. — el evento ya fue agendado automáticamente.`);
+      return;
+    }
+  }
 
   if (data.startsWith('WEB_OK:')) {
-    const turnoId = parseInt(data.split(':')[1]);
-    const t = getTurnoById(turnoId);
-    if (!t) { edit('Turno no encontrado.'); return; }
     updateTurnoEstado(turnoId, 'confirmado');
     const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
     edit(`✅ Turno WEB #${turnoId} confirmado\n\n${t.tipo==='CONTROL_MARCAPASOS'?'Control Marcapasos':'Consulta'}\n📅 ${f}\n🕐 ${t.hora}hs\n👤 ${t.nombre}\n📱 ${t.telefono}\n\nContactar al paciente para notificarle.`);
-    crearEvento({ ...t, id: turnoId })
-      .then(ev => { if (ev?.id) setTurnoGcalId(turnoId, ev.id); })
-      .catch(e => console.error('GCal WEB_OK error:', e.message));
+    // Crear evento solo si no tiene gcal_event_id (el turno se agendó al recibirlo, esto es refuerzo)
+    if (!t.gcal_event_id) {
+      crearEvento({ ...t, id: turnoId })
+        .then(ev => { if (ev?.id) setTurnoGcalId(turnoId, ev.id); })
+        .catch(e => console.error('GCal WEB_OK error:', e.message));
+    }
     return;
   }
 
   if (data.startsWith('WEB_REJ:')) {
-    const turnoId = parseInt(data.split(':')[1]);
-    const t = getTurnoById(turnoId);
-    if (!t) { edit('Turno no encontrado.'); return; }
     updateTurnoEstado(turnoId, 'rechazado');
     if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
     edit(`❌ Turno WEB #${turnoId} rechazado.\n👤 ${t.nombre} — 📱 ${t.telefono}\n\nAvisar al paciente.`);
@@ -617,9 +656,6 @@ bot.on('callback_query', async (query) => {
   }
 
   if (data.startsWith('WEB_REP:')) {
-    const turnoId = parseInt(data.split(':')[1]);
-    const t = getTurnoById(turnoId);
-    if (!t) { edit('Turno no encontrado.'); return; }
     ws(id, { step:'ADMIN_REP_DIA', repTurnoId:turnoId, repPatientId:'WEB' });
     const dias = getProximosDias(6);
     const rows = dias.map(d => {
