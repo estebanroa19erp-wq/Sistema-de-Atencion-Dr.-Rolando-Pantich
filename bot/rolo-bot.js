@@ -654,20 +654,22 @@ startHttpServer(bot, ADMIN_IDS);
 
 bot.on('polling_error', (err) => console.error('POLLING ERR:', err.code, err.message));
 
-// ── Sync desde Google Calendar al arrancar ────────────────────────────────────
-(async () => {
+// ── Sync desde Google Calendar ────────────────────────────────────────────────
+async function syncCalendar(tag) {
   const token = getConfig('google_refresh_token') || process.env.GOOGLE_REFRESH_TOKEN || '';
-  if (!token) { console.log('Sin token GCal — sin sync inicial'); return; }
+  if (!token) return;
   try {
     const hoy = new Date().toISOString().slice(0, 10);
     const hasta = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
     const eventos = await listarEventos(hoy, hasta);
-    importarDesdeCalendar(eventos);
-    console.log(`GCal sync: ${eventos.length} eventos importados`);
+    importarDesdeCalendar(eventos, hoy, hasta);
+    console.log(`GCal sync [${tag}]: ${eventos.length} eventos`);
   } catch (e) {
-    console.error('GCal sync error:', e.message);
+    console.error(`GCal sync error [${tag}]:`, e.message);
   }
-})();
+}
+syncCalendar('startup');
+setInterval(() => syncCalendar('periodic'), 5 * 60 * 1000);
 
 console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
 notify('🟢 Bot iniciado').catch(()=>{});

@@ -133,9 +133,15 @@ function desbloquearSlot(fecha, hora) {
   _slots = _slots.filter(s => !(s.fecha === fecha && s.hora === hora));
 }
 
-function importarDesdeCalendar(eventos) {
+function importarDesdeCalendar(eventos, desde, hasta) {
   const horaInicio = parseInt(_config.hora_inicio || '17');
   const horaFin = parseInt(_config.hora_fin || '22');
+  // Eliminar entradas GCAL del rango para re-sincronizar cambios del Dr.
+  if (desde && hasta) {
+    _turnos = _turnos.filter(t =>
+      !(( t.chat_id === 'GCAL' || t.chat_id === 'GCAL_EXT') && t.fecha >= desde && t.fecha <= hasta)
+    );
+  }
   for (const ev of eventos) {
     const start = ev.start?.dateTime;
     if (!start) continue;
@@ -147,14 +153,11 @@ function importarDesdeCalendar(eventos) {
     const idMatch = desc.match(/ID Turno: #(\d+)/);
     if (idMatch) {
       const id = parseInt(idMatch[1]);
-      if (_turnos.find(t => t.id === id)) continue;
       const nombreMatch = desc.match(/Paciente: ([^\n]+)/);
       const telMatch = desc.match(/Tel: ([^\n]+)/);
       _turnos.push({ id, chat_id: 'GCAL', nombre: nombreMatch?.[1] || ev.summary || '', telefono: telMatch?.[1] || '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
       if (id >= _turnosId) _turnosId = id + 1;
     } else {
-      const gcalKey = `GCAL_${ev.id}`;
-      if (_turnos.find(t => t.gcal_event_id === ev.id)) continue;
       _turnosId++;
       _turnos.push({ id: _turnosId, chat_id: 'GCAL_EXT', nombre: ev.summary || 'Paciente', telefono: '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
     }
