@@ -74,8 +74,8 @@ function startHttpServer(bot, ADMIN_IDS) {
 
     if (url.pathname === '/ping') { json(res, {ok:true, ts:Date.now()}); return; }
 
-    // GET /oauth2callback — Google OAuth redirect
-    if (req.method === 'GET' && url.pathname === '/oauth2callback') {
+    // GET /oauth2callback o / — Google OAuth redirect
+    if (req.method === 'GET' && (url.pathname === '/oauth2callback' || url.pathname === '/')) {
       const code = url.searchParams.get('code');
       if (!code) { res.writeHead(400); res.end('Código no recibido'); return; }
       const resolved = resolveOAuthCode(code);

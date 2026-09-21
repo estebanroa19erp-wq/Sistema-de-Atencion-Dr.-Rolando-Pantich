@@ -5,7 +5,10 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 
 function getRedirectUri() {
   const base = process.env.TUNNEL_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:9876';
-  return base.replace(/\/$/, '') + '/oauth2callback';
+  const clean = base.replace(/\/$/, '');
+  // Si hay OAUTH_PATH definido, usarlo; si no, usar raíz (para clientes tipo "web" sin path)
+  const oauthPath = process.env.OAUTH_PATH || '/oauth2callback';
+  return clean + oauthPath;
 }
 
 function getClient() {
