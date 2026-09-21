@@ -145,6 +145,20 @@ function startHttpServer(bot, ADMIN_IDS) {
       json(res, { ok: true }); return;
     }
 
+    // GET /api/gcal-test — diagnóstico Calendar
+    if (req.method === 'GET' && url.pathname === '/api/gcal-test') {
+      const { listarEventos } = require('./calendar');
+      const hoy = new Date().toISOString().slice(0,10);
+      const hasta = new Date(Date.now() + 30*864e5).toISOString().slice(0,10);
+      try {
+        const evs = await listarEventos(hoy, hasta);
+        json(res, { ok: true, count: evs.length, primeros: evs.slice(0,3).map(e => ({ summary: e.summary, start: e.start, desc: (e.description||'').slice(0,80) })) });
+      } catch(e) {
+        json(res, { ok: false, error: e.message }, 500);
+      }
+      return;
+    }
+
     // PUT /api/register (Cloudflare Worker llama acá? No, bot llama Worker)
     json(res, { error: 'not found' }, 404);
   });
