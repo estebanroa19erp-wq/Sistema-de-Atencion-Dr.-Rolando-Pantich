@@ -151,10 +151,12 @@ function startHttpServer(bot, ADMIN_IDS) {
     if (req.method === 'GET' && url.pathname === '/api/gcal-test') {
       const { listarEventos } = require('./calendar');
       const hoy = new Date().toISOString().slice(0,10);
-      const hasta = new Date(Date.now() + 30*864e5).toISOString().slice(0,10);
+      const hasta = new Date(Date.now() + 60*864e5).toISOString().slice(0,10);
+      const fechaFiltro = url.searchParams.get('fecha');
       try {
         const evs = await listarEventos(hoy, hasta);
-        json(res, { ok: true, count: evs.length, primeros: evs.slice(0,3).map(e => ({ summary: e.summary, start: e.start, desc: (e.description||'').slice(0,80) })) });
+        const filtrados = fechaFiltro ? evs.filter(e => (e.start?.dateTime||'').startsWith(fechaFiltro)) : evs;
+        json(res, { ok: true, count: evs.length, filtrados: filtrados.map(e => ({ summary: e.summary, start: e.start?.dateTime, desc: (e.description||'').slice(0,100) })) });
       } catch(e) {
         json(res, { ok: false, error: e.message }, 500);
       }
