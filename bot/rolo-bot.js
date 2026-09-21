@@ -506,8 +506,16 @@ bot.on('callback_query', async (query) => {
     // Actualizar Google Calendar
     if (t.gcal_event_id) eliminarEvento(t.gcal_event_id).catch(()=>{});
     crearEvento({...t, fecha:repFecha, hora, id:repTurnoId, p2_extra:t.p2_extra||''})
-      .then(ev => { if (ev?.id) setTurnoGcalId(repTurnoId, ev.id); })
-      .catch(()=>{});
+      .then(ev => {
+        if (ev?.id) {
+          setTurnoGcalId(repTurnoId, ev.id);
+          console.log(`GCal rep turno #${repTurnoId} → ${ev.id}`);
+        }
+      })
+      .catch(e => {
+        console.error('GCal REPHORA error:', e.message);
+        notify(`⚠️ Turno #${repTurnoId} reprogramado en sistema pero falló Calendar: ${e.message}`).catch(()=>{});
+      });
     return;
   }
 
