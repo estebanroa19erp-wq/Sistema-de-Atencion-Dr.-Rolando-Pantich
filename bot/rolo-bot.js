@@ -43,7 +43,11 @@ async function notify(msg, opts) {
 }
 
 function getProximosDias(n) {
-  const dias = JSON.parse(getConfig('dias_atencion') || '[2,4]');
+  const diasAtencion = JSON.parse(getConfig('dias_atencion') || '[2,4]');
+  const max = parseInt(getConfig('turnos_por_dia') || '5');
+  const horaInicio = parseInt(getConfig('hora_inicio') || '17');
+  const horaFin = parseInt(getConfig('hora_fin') || '22');
+  const totalSlots = horaFin - horaInicio;
   const result = [];
   const d = new Date();
   d.setHours(0,0,0,0);
@@ -51,14 +55,20 @@ function getProximosDias(n) {
   let checked = 0;
   while (result.length < n && checked < 90) {
     checked++;
-    if (dias.includes(d.getDay())) {
+    if (diasAtencion.includes(d.getDay())) {
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth()+1).padStart(2,'0');
-      const dd = String(d.getDate()).padStart(2,'0');
-      result.push({
-        fecha: `${yyyy}-${mm}-${dd}`,
-        nombre: d.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' })
-      });
+      const dd2 = String(d.getDate()).padStart(2,'0');
+      const fecha = `${yyyy}-${mm}-${dd2}`;
+      const count = getTurnosCountByFecha(fecha);
+      const libres = Math.max(0, Math.min(totalSlots, max) - count);
+      if (libres > 0) {
+        result.push({
+          fecha,
+          nombre: d.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' }),
+          cupos: libres
+        });
+      }
     }
     d.setDate(d.getDate()+1);
   }
@@ -465,11 +475,12 @@ bot.on('callback_query', async (query) => {
     if (!t) { edit('Turno no encontrado.'); return; }
     ws(id, { step:'ADMIN_REP_DIA', repTurnoId:parseInt(turnoId), repPatientId:patientId });
     const dias = getProximosDias(6);
-    const rows = dias.map(d => {
-      const slots = getSlotsLibres(d.fecha);
-      const label = slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`;
-      return [btn(label, slots.length ? `REPDIA:${d.fecha}` : 'LLENO')];
-    });
+    const rows = dias.map(d => [btn(`📅 ${d.nombre} — ${d.cupos} cupo${d.cupos!==1?'s':''}`, `REPDIA:${d.fecha}`)]);
+    if (!rows.length) {
+      bot.deleteMessage(id, msgId).catch(()=>{});
+      bot.sendMessage(id, '⚠️ No hay fechas disponibles en los próximos 90 días para reprogramar.').catch(()=>{});
+      return;
+    }
     bot.deleteMessage(id, msgId).catch(()=>{});
     bot.sendMessage(id, `🔄 *Reprogramar turno \\#${turnoId}*\n\nElegí el nuevo día:`, {parse_mode:'MarkdownV2', ...kb(rows)});
     return;
@@ -678,10 +689,11 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('WEB_REP:')) {
     ws(id, { step:'ADMIN_REP_DIA', repTurnoId:turnoId, repPatientId:'WEB', repTurno: t });
     const dias = getProximosDias(6);
-    const rows = dias.map(d => {
-      const slots = getSlotsLibres(d.fecha);
-      return [btn(slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`, slots.length ? `REPDIA:${d.fecha}` : 'LLENO')];
-    });
+    const rows = dias.map(d => [btn(`📅 ${d.nombre} — ${d.cupos} cupo${d.cupos!==1?'s':''}`, `REPDIA:${d.fecha}`)]);
+    if (!rows.length) {
+      edit(`⚠️ No hay fechas disponibles en los próximos 90 días para reprogramar.`);
+      return;
+    }
     bot.deleteMessage(id, msgId).catch(()=>{});
     bot.sendMessage(id, `🔄 Reprogramar turno WEB #${turnoId} - ${t.nombre}\n\nElegí el nuevo día:`, kb(rows))
       .catch(e => {
