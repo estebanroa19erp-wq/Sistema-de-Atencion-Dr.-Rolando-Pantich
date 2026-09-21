@@ -720,5 +720,13 @@ async function syncCalendar(tag) {
 syncCalendar('startup');
 setInterval(() => syncCalendar('periodic'), 5 * 60 * 1000);
 
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err.message, err.stack);
+  notify(`⚠️ Error interno bot: ${err.message}`).catch(()=>{});
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', reason);
+});
+
 console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
 notify('🟢 Bot iniciado').catch(()=>{});
