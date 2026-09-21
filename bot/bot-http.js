@@ -166,7 +166,7 @@ function startHttpServer(bot, ADMIN_IDS) {
       const { crearEvento, eliminarEvento } = require('./calendar');
       try {
         const mañana = new Date(Date.now() + 864e5).toISOString().slice(0,10);
-        const ev = await crearEvento({ id: 9999, nombre: 'TEST BORRAR', telefono: '0000', fecha: mañana, hora: '23:00', tipo: 'CONSULTA_SIMPLE', p1: '', p2: 'CORRIENTES_CAPITAL', p2_extra: '', derivado: 0, nombre_colega: '' });
+        const ev = await crearEvento({ id: 9999, nombre: 'TEST BORRAR', telefono: '0000', fecha: mañana, hora: '19:00', tipo: 'CONSULTA_SIMPLE', p1: '', p2: 'CORRIENTES_CAPITAL', p2_extra: '', derivado: 0, nombre_colega: '' });
         if (ev?.id) await eliminarEvento(ev.id);
         json(res, { ok: true, eventId: ev?.id, msg: 'evento creado y borrado OK' });
       } catch(e) {

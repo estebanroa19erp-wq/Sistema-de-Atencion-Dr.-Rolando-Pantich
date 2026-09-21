@@ -72,7 +72,14 @@ async function crearEvento(turno) {
 
   const hora = turno.hora;
   const [hh, mm] = hora.split(':');
-  const endHH = String(parseInt(hh) + 1).padStart(2, '0');
+  const endMin = parseInt(hh) * 60 + parseInt(mm || '0') + 60;
+  const endH = Math.floor(endMin / 60) % 24;
+  const endM = endMin % 60;
+  const endDate = endH < parseInt(hh) ? new Date(turno.fecha + 'T00:00:00') : null;
+  if (endDate) endDate.setDate(endDate.getDate() + 1);
+  const endDateStr = endDate ? endDate.toISOString().slice(0,10) : turno.fecha;
+  const endHH = String(endH).padStart(2, '0');
+  const endMM = String(endM).padStart(2, '0');
   const tz = 'America/Argentina/Corrientes';
 
   const tipoLabel = turno.tipo === 'CONTROL_MARCAPASOS' ? 'Control Marcapasos' : 'Consulta Cardiología';
@@ -92,7 +99,7 @@ async function crearEvento(turno) {
       `Vía: Bot Telegram`
     ].join('\n'),
     start: { dateTime: `${turno.fecha}T${hora}:00-03:00`, timeZone: tz },
-    end: { dateTime: `${turno.fecha}T${endHH}:${mm}:00-03:00`, timeZone: tz },
+    end: { dateTime: `${endDateStr}T${endHH}:${endMM}:00-03:00`, timeZone: tz },
     reminders: {
       useDefault: false,
       overrides: [{ method: 'popup', minutes: 60 }, { method: 'popup', minutes: 15 }]
