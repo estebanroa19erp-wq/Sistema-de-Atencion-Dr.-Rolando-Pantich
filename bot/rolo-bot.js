@@ -9,10 +9,10 @@ const {
   getProximosTurnos, getTurnosHoy, getTurnosPendientes,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
   getTurnosCountByFecha, getHorasOcupadas,
-  syncDB
+  importarDesdeCalendar, syncDB
 } = require('./db');
 syncDB().catch(() => {});
-const { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento } = require('./calendar');
+const { getAuthUrl, waitForCode, exchangeCode, crearEvento, eliminarEvento, listarEventos } = require('./calendar');
 
 const TOKEN = process.env.BOT_TOKEN;
 if (!TOKEN) { console.error('BOT_TOKEN faltante'); process.exit(1); }
@@ -653,6 +653,21 @@ startHttpServer(bot, ADMIN_IDS);
 })();
 
 bot.on('polling_error', (err) => console.error('POLLING ERR:', err.code, err.message));
+
+// ── Sync desde Google Calendar al arrancar ────────────────────────────────────
+(async () => {
+  const token = getConfig('google_refresh_token') || process.env.GOOGLE_REFRESH_TOKEN || '';
+  if (!token) { console.log('Sin token GCal — sin sync inicial'); return; }
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const hasta = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
+    const eventos = await listarEventos(hoy, hasta);
+    importarDesdeCalendar(eventos);
+    console.log(`GCal sync: ${eventos.length} eventos importados`);
+  } catch (e) {
+    console.error('GCal sync error:', e.message);
+  }
+})();
 
 console.log('🏥 Bot Dr. Pantich activo — admins:', ADMIN_IDS);
 notify('🟢 Bot iniciado').catch(()=>{});

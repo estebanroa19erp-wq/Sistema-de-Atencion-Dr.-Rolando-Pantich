@@ -133,6 +133,24 @@ function desbloquearSlot(fecha, hora) {
   _slots = _slots.filter(s => !(s.fecha === fecha && s.hora === hora));
 }
 
+function importarDesdeCalendar(eventos) {
+  for (const ev of eventos) {
+    const desc = ev.description || '';
+    if (!desc.includes('Vía: Bot Telegram')) continue;
+    const idMatch = desc.match(/ID Turno: #(\d+)/);
+    const start = ev.start?.dateTime;
+    if (!start || !idMatch) continue;
+    const id = parseInt(idMatch[1]);
+    if (_turnos.find(t => t.id === id)) continue;
+    const fecha = start.slice(0, 10);
+    const hora = start.slice(11, 16);
+    const nombreMatch = desc.match(/Paciente: ([^\n]+)/);
+    const telMatch = desc.match(/Tel: ([^\n]+)/);
+    _turnos.push({ id, chat_id: 'GCAL', nombre: nombreMatch?.[1] || '', telefono: telMatch?.[1] || '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
+    if (id >= _turnosId) _turnosId = id + 1;
+  }
+}
+
 module.exports = {
   db: null, syncDB, getConfig, setConfig,
   getSession, saveSession, deleteSession,
@@ -142,5 +160,6 @@ module.exports = {
   cancelarTurno, getTurnoById,
   getProximosTurnos, getTurnosHoy,
   isSlotBloqueado, bloquearSlot, desbloquearSlot,
-  getHorasOcupadas, getTurnosCountByFecha, getUrgenciasCountHoy
+  getHorasOcupadas, getTurnosCountByFecha, getUrgenciasCountHoy,
+  importarDesdeCalendar
 };

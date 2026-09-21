@@ -112,7 +112,7 @@ async function eliminarEvento(eventId) {
 }
 
 async function listarEventos(desde, hasta) {
-  const token = getConfig('google_refresh_token');
+  const token = getConfig('google_refresh_token') || process.env.GOOGLE_REFRESH_TOKEN || '';
   if (!token) return [];
   const auth = getClient();
   const calendar = google.calendar({ version: 'v3', auth });
