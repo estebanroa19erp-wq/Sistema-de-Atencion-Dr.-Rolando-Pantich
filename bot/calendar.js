@@ -80,7 +80,7 @@ async function crearEvento(turno) {
   const endDateStr = endDate ? endDate.toISOString().slice(0,10) : turno.fecha;
   const endHH = String(endH).padStart(2, '0');
   const endMM = String(endM).padStart(2, '0');
-  const tz = 'America/Argentina/Corrientes';
+  const tz = 'America/Argentina/Buenos_Aires';
 
   const tipoLabel = turno.tipo === 'CONTROL_MARCAPASOS' ? 'Control Marcapasos' : 'Consulta Cardiología';
   const derivadoInfo = turno.derivado ? `\nDerivado por: ${turno.nombre_colega}` : '';
