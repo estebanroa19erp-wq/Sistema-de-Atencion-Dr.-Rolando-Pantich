@@ -134,20 +134,30 @@ function desbloquearSlot(fecha, hora) {
 }
 
 function importarDesdeCalendar(eventos) {
+  const horaInicio = parseInt(_config.hora_inicio || '17');
+  const horaFin = parseInt(_config.hora_fin || '22');
   for (const ev of eventos) {
-    const desc = ev.description || '';
-    if (!desc.includes('Vía: Bot Telegram')) continue;
-    const idMatch = desc.match(/ID Turno: #(\d+)/);
     const start = ev.start?.dateTime;
-    if (!start || !idMatch) continue;
-    const id = parseInt(idMatch[1]);
-    if (_turnos.find(t => t.id === id)) continue;
+    if (!start) continue;
     const fecha = start.slice(0, 10);
     const hora = start.slice(11, 16);
-    const nombreMatch = desc.match(/Paciente: ([^\n]+)/);
-    const telMatch = desc.match(/Tel: ([^\n]+)/);
-    _turnos.push({ id, chat_id: 'GCAL', nombre: nombreMatch?.[1] || '', telefono: telMatch?.[1] || '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
-    if (id >= _turnosId) _turnosId = id + 1;
+    const h = parseInt(hora.slice(0, 2));
+    if (h < horaInicio || h >= horaFin) continue;
+    const desc = ev.description || '';
+    const idMatch = desc.match(/ID Turno: #(\d+)/);
+    if (idMatch) {
+      const id = parseInt(idMatch[1]);
+      if (_turnos.find(t => t.id === id)) continue;
+      const nombreMatch = desc.match(/Paciente: ([^\n]+)/);
+      const telMatch = desc.match(/Tel: ([^\n]+)/);
+      _turnos.push({ id, chat_id: 'GCAL', nombre: nombreMatch?.[1] || ev.summary || '', telefono: telMatch?.[1] || '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
+      if (id >= _turnosId) _turnosId = id + 1;
+    } else {
+      const gcalKey = `GCAL_${ev.id}`;
+      if (_turnos.find(t => t.gcal_event_id === ev.id)) continue;
+      _turnosId++;
+      _turnos.push({ id: _turnosId, chat_id: 'GCAL_EXT', nombre: ev.summary || 'Paciente', telefono: '', fecha, hora, tipo: 'CONSULTA_CARDIOLOGIA', p1: '', p2: '', p2_extra: '', derivado: 0, nombre_colega: '', es_urgencia: 0, estado: 'confirmado', gcal_event_id: ev.id || null, created_at: new Date().toISOString() });
+    }
   }
 }
 
