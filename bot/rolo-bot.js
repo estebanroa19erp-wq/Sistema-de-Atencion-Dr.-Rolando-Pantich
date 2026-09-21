@@ -48,7 +48,9 @@ function getProximosDias(n) {
   const d = new Date();
   d.setHours(0,0,0,0);
   d.setDate(d.getDate() + 1);
-  while (result.length < n) {
+  let checked = 0;
+  while (result.length < n && checked < 90) {
+    checked++;
     if (dias.includes(d.getDay())) {
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth()+1).padStart(2,'0');
@@ -681,7 +683,11 @@ bot.on('callback_query', async (query) => {
       return [btn(slots.length ? `📅 ${d.nombre} (${slots.length})` : `❌ ${d.nombre} — lleno`, slots.length ? `REPDIA:${d.fecha}` : 'LLENO')];
     });
     bot.deleteMessage(id, msgId).catch(()=>{});
-    bot.sendMessage(id, `🔄 Reprogramar turno WEB #${turnoId} - ${t.nombre}\n\nElegí el nuevo día:`, kb(rows));
+    bot.sendMessage(id, `🔄 Reprogramar turno WEB #${turnoId} - ${t.nombre}\n\nElegí el nuevo día:`, kb(rows))
+      .catch(e => {
+        console.error('WEB_REP sendMessage error:', e.message);
+        notify(`⚠️ Error mostrando días para reprogramar: ${e.message}`).catch(()=>{});
+      });
     return;
   }
 });
