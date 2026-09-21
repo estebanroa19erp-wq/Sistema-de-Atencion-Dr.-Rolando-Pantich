@@ -17,7 +17,7 @@ function getClient() {
     process.env.GOOGLE_CLIENT_SECRET,
     getRedirectUri()
   );
-  const token = getConfig('google_refresh_token');
+  const token = getConfig('google_refresh_token') || process.env.GOOGLE_REFRESH_TOKEN || '';
   if (token) client.setCredentials({ refresh_token: token });
   return client;
 }
@@ -65,7 +65,7 @@ async function exchangeCode(code) {
 }
 
 async function crearEvento(turno) {
-  const token = getConfig('google_refresh_token');
+  const token = getConfig('google_refresh_token') || process.env.GOOGLE_REFRESH_TOKEN || '';
   if (!token) throw new Error('sin_token');
   const auth = getClient();
   const calendar = google.calendar({ version: 'v3', auth });
