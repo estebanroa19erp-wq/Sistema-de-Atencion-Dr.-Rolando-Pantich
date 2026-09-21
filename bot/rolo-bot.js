@@ -600,6 +600,9 @@ bot.on('callback_query', async (query) => {
     updateTurnoEstado(turnoId, 'confirmado');
     const f = new Date(t.fecha+'T12:00:00').toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'});
     edit(`✅ Turno WEB #${turnoId} confirmado\n\n${t.tipo==='CONTROL_MARCAPASOS'?'Control Marcapasos':'Consulta'}\n📅 ${f}\n🕐 ${t.hora}hs\n👤 ${t.nombre}\n📱 ${t.telefono}\n\nContactar al paciente para notificarle.`);
+    crearEvento({ ...t, id: turnoId })
+      .then(ev => { if (ev?.id) setTurnoGcalId(turnoId, ev.id); })
+      .catch(e => console.error('GCal WEB_OK error:', e.message));
     return;
   }
 
