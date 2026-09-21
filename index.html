@@ -473,7 +473,9 @@
             const card=el.closest('.day-card')||el;
             card.classList.add('active');
             state.selectedDay={fecha,nombre};
-            document.getElementById('slotsSection').classList.remove('hidden');
+            const ss=document.getElementById('slotsSection');
+            ss.classList.remove('hidden');
+            ss.classList.add('active');
             generarHorarios();
             setTimeout(()=>document.getElementById('slotsSection').scrollIntoView({behavior:'smooth'}),100);
         }
